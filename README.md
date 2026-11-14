@@ -28,7 +28,7 @@ sudo bash -c "curl -fsSL https://raw.githubusercontent.com/hrf100/pm5m/main/depl
 
 脚本会装 Python 3.9+ 与依赖、创建系统用户 `pm5m`、代码放到 `/opt/pm5m`、数据放到 `/var/lib/pm5m`、生成 `/etc/pm5m.env`（随机网页密码，权限 600）、注册并启动 `pm5m.service`。应用监听 `0.0.0.0:8080`，浏览器打开 `http://服务器IP:8080`。重复执行会按 GitHub `main` 升级，不会改已有密码和私钥；若旧配置还写着 `127.0.0.1`，会改成直接监听。
 
-装完：用户名 `admin`，密码在安装输出和 `/etc/pm5m.env` 的 `PM5M_PASSWORD`。私钥写入同一文件的 `PM5M_PRIVATE_KEY`、`PM5M_FUNDER` 后执行 `sudo systemctl restart pm5m`。云厂商安全组要放行 TCP 8080。日志：`journalctl -u pm5m -f`。
+装完：用户名 `admin`，密码在安装输出和 `/etc/pm5m.env` 的 `PM5M_PASSWORD`。私钥只写 `PM5M_PRIVATE_KEY`，然后 `sudo systemctl restart pm5m`。资金地址和账户类型会自动识别。云厂商安全组要放行 TCP 8080。日志：`journalctl -u pm5m -f`。
 
 ### 本地开发
 
@@ -46,19 +46,11 @@ python -m pm5m --host 127.0.0.1 --port 8080 --data-dir ./data
 - **服务器时钟必须准**（chainlink/窗口边界都依赖它）：`chronyc tracking` 或 `timedatectl`，偏差 > 1 秒会在自检里报错。安装脚本会尝试打开 NTP。
 - 网页地址是 `http://服务器IP:8080`，需要登录。私钥不要填进网页，只写在 `/etc/pm5m.env`。所有写操作需要 `X-Requested-With` 头，防跨站请求。
 
-## 钱包设置怎么填
+## 钱包
 
-| 你的账户类型 | 签名类型 | 资金地址 funder |
-|---|---|---|
-| 普通钱包直接交易（EOA） | 0 | 留空（=签名地址） |
-| 邮箱/Magic 登录 | 1 | Polymarket 个人资料里的地址 |
-| 浏览器钱包 + Polymarket 代理（Safe） | 2 | Polymarket 个人资料里的地址 |
-| 新版 Deposit Wallet | 3 | 个人资料里的地址 |
+只填私钥。签名地址由私钥推出；资金地址从 Gamma 公开资料的 `proxyWallet` 读取；账户类型按该地址的合约代码识别（EOA / 代理 / Safe / 充值）。私钥不保存。API 凭据只用于鉴权。
 
-- **私钥**：只需填一次，页面会推导 API 凭据并保存凭据；**默认不保存私钥**（勾选才保存）。凭据本身不能转走资金，下单仍需私钥签名。
-- 设置 `PM5M_SECRET_PASSPHRASE` 后，`secrets.json` 用口令加密（scrypt + Fernet）。
-- 建议使用**专用小额钱包**。清除：页面「清除钱包数据」。
-- 页面显示：CLOB 可用余额（L2 鉴权接口）、链上 pUSD 余额（Polygon RPC）、持仓与总值（公开 Data API，按 funder 地址查询）。
+`PM5M_FUNDER` 和 `PM5M_SIG_TYPE` 只有两个都写上时才覆盖自动结果。
 
 ## 页面功能
 
@@ -128,8 +120,6 @@ python -m pm5m.research --synth 1500
 ```bash
 cd /opt/pm5m && . .venv/bin/activate
 export PM5M_PRIVATE_KEY=0x...        # 可选：只用于推导 API 凭据，不会保存或打印
-export PM5M_FUNDER=0x...             # 可选：Polymarket 个人资料地址
-export PM5M_SIG_TYPE=2               # 0 EOA / 1 POLY_PROXY / 2 GNOSIS_SAFE / 3 DEPOSIT_WALLET
 python -m pm5m.selftest
 ```
 脚本依次检查：地域限制、时钟、当前 Gamma 市场、API 凭据推导、PolyBolt（鉴权、订阅确认、25 秒内各频道帧数、首帧字段、TWAP 与现货差值）、Binance 逐笔、CLOB 余额、链上 pUSD、CLOB 市场频道。

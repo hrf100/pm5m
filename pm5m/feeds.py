@@ -23,6 +23,25 @@ BINANCE_WS = ["wss://stream.binance.com:9443/ws/btcusdt@trade", "wss://data-stre
 PUSD = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
 POLYGON_RPCS = ["https://polygon-bor-rpc.publicnode.com", "https://polygon-rpc.com"]
 UA = {"User-Agent": "pm5m-paper/0.1"}
+# Runtime code of Polymarket account wallets. Deposit wallets share an ERC-1967 prefix; the implementation address may change.
+POLY_PROXY_CODE = "363d3d373d3d3d363d7344e999d5c2f66ef0861317f9a4805ac2e90aeb4f5af43d82803e903d91602b57fd5bf3"
+SAFE_PROXY_CODE = ("6080604052600080546001600160a01b0316813563530ca43760e11b1415602857808252602082f35b3682833781823684845af490503d82833e806041573d82fd5b"
+                   "503d81f3fea264697066735822122015938e3bf2c49f5df5c1b7f9569fa85cc5d6f3074bb258a2dc0c7e299bc9e33664736f6c63430008040033")
+DEPOSIT_CODE_PREFIX = "363d3d373d3d363d7f360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc545af43d6000803e6038573d6000fd5b3d6000f3"
+
+
+def signature_type_from_code(code: str) -> Optional[int]:
+    """0 EOA, 1 POLY_PROXY, 2 GNOSIS_SAFE, 3 deposit wallet. None if the runtime is unknown."""
+    code = (code or "").lower().removeprefix("0x")
+    if code == "":
+        return 0
+    if code == POLY_PROXY_CODE:
+        return 1
+    if code == SAFE_PROXY_CODE:
+        return 2
+    if code.startswith(DEPOSIT_CODE_PREFIX):
+        return 3
+    return None
 
 
 def polybolt_subscribe_frame(rid: str = "s1") -> dict:
@@ -92,6 +111,39 @@ class Api:
         if isinstance(d, list) and d:
             return parsers._f(d[0].get("value"))
         return None
+
+    async def eth_code(self, addr: str) -> str:
+        body = {"jsonrpc": "2.0", "id": 1, "method": "eth_getCode", "params": [addr, "latest"]}
+        last = None
+        for rpc in POLYGON_RPCS:
+            try:
+                d, _ = await self.post(rpc, body)
+                if isinstance(d, dict) and "result" in d:
+                    return d["result"]
+                last = d.get("error") if isinstance(d, dict) else d
+            except Exception as e:
+                last = e
+        raise RuntimeError(f"polygon rpc failed: {last}")
+
+    async def resolve_account(self, signer: str) -> dict:
+        """Funder address and signature type for a signer. Only the private key is required upstream."""
+        funder = signer
+        try:
+            d, _ = await self.get(f"{GAMMA}/public-profile", params={"address": signer})
+            pw = d.get("proxyWallet") if isinstance(d, dict) else None
+            if isinstance(pw, str) and parsers.is_address(pw):
+                funder = pw
+        except ApiError as e:
+            if e.status not in (400, 404):
+                raise
+        if funder.lower() == signer.lower():
+            return {"funder": signer, "sig_type": 0}
+        sig = signature_type_from_code(await self.eth_code(funder))
+        if sig is None:
+            raise RuntimeError(f"无法识别资金地址的合约类型: {funder}")
+        if sig == 0:
+            sig = 3    # proxy address with no code yet: current Polymarket accounts are deposit wallets
+        return {"funder": funder, "sig_type": sig}
 
     async def onchain_pusd(self, addr: str) -> float:
         data = "0x70a08231" + addr.lower().replace("0x", "").rjust(64, "0")

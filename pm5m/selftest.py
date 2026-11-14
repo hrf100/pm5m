@@ -5,8 +5,7 @@
 Environment (all optional; missing ones are reported as SKIP):
   PM5M_PRIVATE_KEY        wallet key, used once to derive CLOB API credentials (not stored, not printed)
   PM5M_API_KEY / PM5M_API_SECRET / PM5M_API_PASSPHRASE / PM5M_SIGNER   manual credentials instead of the key
-  PM5M_FUNDER             Polymarket profile address (funder), needed for balance/position checks
-  PM5M_SIG_TYPE           0 EOA, 1 POLY_PROXY, 2 GNOSIS_SAFE (default), 3 DEPOSIT_WALLET
+  PM5M_FUNDER / PM5M_SIG_TYPE   optional override; otherwise looked up from the signer
 
 Secrets are never printed: only masked prefixes/suffixes.
 """
@@ -82,7 +81,8 @@ async def main() -> int:
         api = Api(session)
         pk = os.environ.get("PM5M_PRIVATE_KEY", "").strip()
         funder = os.environ.get("PM5M_FUNDER", "").strip()
-        sig_type = int(os.environ.get("PM5M_SIG_TYPE", "2"))
+        sig_raw = os.environ.get("PM5M_SIG_TYPE", "").strip()
+        sig_type = int(sig_raw) if sig_raw else None
         out("INFO", "时间", time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()))
 
         # 1. geoblock
@@ -132,6 +132,13 @@ async def main() -> int:
             out("PASS", "API 凭据（手动）", f"apiKey={mask(creds['apiKey'])}")
         else:
             out("SKIP", "API 凭据", "未设置 PM5M_PRIVATE_KEY 或 PM5M_API_KEY")
+        if signer and not (funder and sig_type is not None):
+            try:
+                acct = await api.resolve_account(signer)
+                funder, sig_type = acct["funder"], acct["sig_type"]
+                out("PASS", "账户识别", f"funder={mask(funder)} sig={sig_type}")
+            except Exception as e:
+                out("FAIL", "账户识别", f"{type(e).__name__}: {str(e)[:200]}")
 
         # 5. PolyBolt
         if creds:
@@ -178,7 +185,7 @@ async def main() -> int:
             out("FAIL", "Binance", "两个地址均无数据（参考源不可用，可关闭）")
 
         # 7. CLOB balance (L2)
-        if creds and signer:
+        if creds and signer and sig_type is not None:
             try:
                 bal = await api.clob_balance(signer, creds, sig_type)
                 out("PASS", "CLOB 可用余额（L2 鉴权）", f"${bal:.2f}" if bal is not None else "返回无余额字段")

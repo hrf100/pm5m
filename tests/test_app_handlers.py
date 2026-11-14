@@ -149,6 +149,8 @@ class TestHandlers(unittest.TestCase):
             errors = {}
             async def reconnect_polybolt(self): pass
         class FakeApi:
+            async def resolve_account(self, signer):
+                return {"funder": "0x" + "cd" * 20, "sig_type": 2}
             async def clob_balance(self, *a): return 12.5
             async def onchain_pusd(self, a): return 7.0
             async def value(self, a): return 3.0

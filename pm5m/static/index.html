@@ -92,22 +92,12 @@ button.red{background:#6a2230;border-color:#96303f}button.grn{background:#1f5a3f
   </section>
 
   <section class="card c6">
-    <h2>钱包与 API</h2>
+    <h2>钱包</h2>
     <div class="kv" id="wallet"></div>
-    <hr style="border-color:var(--line)">
-    <div class="grid2">
-      <label>签名类型<select id="w_sig"><option value="0">0 EOA</option><option value="1">1 POLY_PROXY</option><option value="2" selected>2 GNOSIS_SAFE</option><option value="3">3 DEPOSIT_WALLET</option></select></label>
-      <label>资金地址 funder<input id="w_funder" class="wide" placeholder="0x… Polymarket 个人资料里的地址"></label>
-    </div>
-    <div id="pkrow"><label>私钥（仅用于一次性推导 API 凭据）<input id="w_pk" type="password" class="wide" autocomplete="off" placeholder="0x…（不会回显，不会写日志）"></label>
-    <label><span>推导后保存私钥到服务器（默认不保存）</span><input type="checkbox" id="w_store"></label>
-    <div class="row"><button onclick="saveWallet()">推导 API 凭据并保存</button></div></div>
-    <div class="row"><button onclick="refreshWallet()">刷新余额</button><button class="red" onclick="delWallet()">清除钱包数据</button><span id="wmsg" class="note"></span></div>
-    <details><summary class="note">不想粘贴私钥？手动填写已有 API 凭据</summary>
-      <label>签名钱包地址<input id="m_signer" class="wide"></label><label>apiKey<input id="m_key" class="wide"></label>
-      <label>secret<input id="m_secret" type="password" class="wide"></label><label>passphrase<input id="m_pass" type="password" class="wide"></label>
-      <div class="row"><button onclick="saveManual()">保存凭据</button></div></details>
-    <div class="note">说明：API 凭据只能用于鉴权，下单仍需私钥签名；本版本只做纸面测试，不下单。建议用专用小额钱包。</div>
+    <div id="pkrow"><label>私钥<input id="w_pk" type="password" class="wide" autocomplete="off" placeholder="0x…"></label>
+    <div class="row"><button onclick="saveWallet()">保存</button></div></div>
+    <div class="row"><button onclick="refreshWallet()">刷新余额</button><button class="red" onclick="delWallet()">清除</button><span id="wmsg" class="note"></span></div>
+    <div class="note" id="wnote"></div>
   </section>
   <section class="card c6">
     <h2>持仓</h2>
@@ -149,12 +139,9 @@ async function resetRec(){
   if(!confirm('确定重置所有纸面交易记录？'+($('arch').checked?'（旧记录会先归档到 data/archive）':'（不归档，将永久删除）')))return;
   try{const r=await api('/api/reset','POST',{confirm:true,archive:$('arch').checked,include_series:$('rser').checked});alert('已重置'+(r.archived_to?'，归档到 '+r.archived_to:''))}catch(e){alert(e.message)}}
 async function saveWallet(){
-  $('wmsg').textContent='处理中…';
-  try{const r=await api('/api/wallet','POST',{private_key:$('w_pk').value,funder:$('w_funder').value,signature_type:+$('w_sig').value,store_key:$('w_store').checked});
-    $('w_pk').value='';$('wmsg').textContent='成功：signer '+r.signer}catch(e){$('wmsg').textContent='失败: '+e.message}}
-async function saveManual(){
-  try{await api('/api/wallet','POST',{signer_address:$('m_signer').value,api_key:$('m_key').value,api_secret:$('m_secret').value,api_passphrase:$('m_pass').value,funder:$('w_funder').value,signature_type:+$('w_sig').value});
-    $('m_secret').value='';$('m_pass').value='';$('wmsg').textContent='已保存'}catch(e){$('wmsg').textContent='失败: '+e.message}}
+  $('wmsg').textContent='识别中';
+  try{await api('/api/wallet','POST',{private_key:$('w_pk').value});
+    $('w_pk').value='';$('wmsg').textContent='已识别'}catch(e){$('wmsg').textContent=e.message}}
 async function delWallet(){if(confirm('清除服务器上保存的 API 凭据（和私钥，如有）？')){await api('/api/wallet','DELETE');}}
 async function refreshWallet(){try{await api('/api/wallet/refresh','POST',{})}catch(e){$('wmsg').textContent=e.message}}
 async function selftest(){
@@ -198,6 +185,7 @@ function chips(feeds){return Object.values(feeds).map(f=>{const c=f.state==='con
 function render(st){
   window._bn=st.binance_enabled;window._rec=st.record_series;
   $('pkrow').style.display=st.allow_web_key?'':'none';
+  $('wnote').textContent=st.allow_web_key?'只填私钥，地址和类型自动识别。':'私钥写在服务器 PM5M_PRIVATE_KEY，地址和类型自动识别。';
   if(!cfgLoaded)buildCfg(st.strategy.cfg);
   $('feeds').innerHTML=chips(st.feeds);
   const g=st.geo||{};$('geo').className='chip '+(g.blocked?'bad':(g.error?'warn':'ok'));$('geo').textContent=g.blocked?`地域受限 ${g.country||''}`:(g.error?'geo 未知':`地域 ${g.country||''} 可用`);
@@ -221,7 +209,7 @@ function render(st){
     return `<tr><td>${o.id}</td><td>${t}</td><td style="color:var(--${o.side==='Up'?'up':'dn'})">${o.side}</td><td>${f2(o.price)}</td><td>${f2(o.shares,0)}</td><td>${f2(o.filled,0)}</td><td>${esc(o.status)}${o.reason?'/'+esc(o.reason):''}</td><td>${f2(o.tau,0)}</td><td>${f2(o.queue,0)}</td><td>${f2(o.model_p,3)}</td><td>${o.settled?(o.won?'翻转✓':'未翻转'):'-'}</td><td class="${o.pnl>0?'ok':(o.pnl<0?'bad':'')}">${o.pnl==null?'-':f2(o.pnl)}</td></tr>`}).join('');
   const wl=st.wallet;
   $('wallet').innerHTML=[['凭据',wl.has_creds?`<span class="ok">已设置</span> apiKey ${esc(wl.api_key)}`:'<span class="warn">未设置（无法使用 PolyBolt/Chainlink TWAP）</span>'],
-    ['签名地址',esc(wl.signer||'-')],['资金地址',esc(wl.funder||'-')],['私钥',wl.key_stored?'<span class="warn">已保存在服务器'+(wl.secrets_encrypted?'（加密）':'（未加密，权限600）')+'</span>':'未保存'],
+    ['签名地址',esc(wl.signer||'-')],['资金地址',esc(wl.funder||'-')+(wl.has_creds?' · '+(['EOA','代理','Safe','充值'][wl.sig_type]||''):'')],
     ['CLOB 可用余额',wl.clob_balance==null?'-':usd(wl.clob_balance)],['链上 pUSD',wl.onchain_pusd==null?'-':usd(wl.onchain_pusd)],['持仓总值',wl.positions_value==null?'-':usd(wl.positions_value)],
     ['更新',wl.updated?new Date(wl.updated*1000).toISOString().slice(11,19)+' UTC':'-']].map(([k,v])=>`<div>${k}</div><div>${v}</div>`).join('');
   $('pos').innerHTML=(wl.positions||[]).slice(0,60).map(r=>`<tr><td>${esc(r.title)}</td><td>${esc(r.outcome)}</td><td>${f2(r.size)}</td><td>${f2(r.avg_price,3)}</td><td>${f2(r.cur_price,3)}</td><td>${usd(r.value)}</td><td class="${r.pnl>0?'ok':(r.pnl<0?'bad':'')}">${usd(r.pnl)}</td></tr>`).join('')||'<tr><td colspan=7 class="mut">无持仓或未设置钱包</td></tr>';

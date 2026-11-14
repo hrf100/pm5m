@@ -28,6 +28,15 @@ STATIC = os.path.join(os.path.dirname(__file__), "static")
 CSRF_HEADER = ("X-Requested-With", "pm5m")
 
 
+def explicit_account() -> Optional[dict]:
+    """Use funder and signature type only when both were set. Otherwise the caller looks them up."""
+    funder = (os.environ.get("PM5M_FUNDER") or "").strip()
+    sig = (os.environ.get("PM5M_SIG_TYPE") or "").strip()
+    if not funder or not sig:
+        return None
+    return {"funder": funder, "sig_type": int(sig)}
+
+
 def mask(s: Optional[str], keep: int = 4) -> str:
     if not s:
         return ""
@@ -139,8 +148,8 @@ class App:
             pk = pk if pk.startswith("0x") else "0x" + pk
             signer = address_from_key(pk)
             creds = await self.api.derive_creds(pk)
-            self.secrets = {"signer": signer, "funder": os.environ.get("PM5M_FUNDER") or signer,
-                            "sig_type": int(os.environ.get("PM5M_SIG_TYPE", "2")), "creds": creds}
+            acct = explicit_account() or await self.api.resolve_account(signer)
+            self.secrets = {"signer": signer, "funder": acct["funder"], "sig_type": acct["sig_type"], "creds": creds}
             self.save_secrets()
             self.last_error = ""
             asyncio.create_task(self.feeds.reconnect_polybolt())
@@ -341,16 +350,9 @@ class App:
 
     async def h_wallet_post(self, request):
         body = await request.json()
-        sig_type = int(body.get("signature_type", 0))
-        if sig_type not in (0, 1, 2, 3):
-            return web.json_response({"error": "signature_type must be 0,1,2 or 3"}, status=400)
         pk = (body.get("private_key") or "").strip()
-        funder = (body.get("funder") or "").strip()
-        if funder and not parsers.is_address(funder):
-            return web.json_response({"error": "funder 地址格式不正确"}, status=400)
         if pk and not self.allow_web_key:
-            return web.json_response({"error": "网页输入私钥已禁用。请在服务器环境变量 PM5M_PRIVATE_KEY 中设置，"
-                                               "或改用手动 API 凭据。"}, status=403)
+            return web.json_response({"error": "网页输入私钥已禁用。请在服务器环境变量 PM5M_PRIVATE_KEY 中设置。"}, status=403)
         if pk and not self.transport_ok(request):
             return web.json_response({"error": "拒绝通过明文 HTTP 传输私钥：请用 HTTPS 反向代理或 SSH 隧道访问（127.0.0.1）"}, status=403)
         try:
@@ -359,22 +361,18 @@ class App:
                 pk = pk if pk.startswith("0x") else "0x" + pk
                 signer = address_from_key(pk)
                 creds = await self.api.derive_creds(pk)
-                new = {"signer": signer, "funder": funder or signer, "sig_type": sig_type, "creds": creds}
-                if body.get("store_key"):
-                    new["private_key"] = pk
-                self.secrets = new
+                acct = await self.api.resolve_account(signer)
+                self.secrets = {"signer": signer, "funder": acct["funder"], "sig_type": acct["sig_type"], "creds": creds}
             elif body.get("api_key"):
                 signer = (body.get("signer_address") or "").strip()
                 if not parsers.is_address(signer):
                     return web.json_response({"error": "手动凭据需要填写签名钱包地址 signer_address"}, status=400)
-                self.secrets = {"signer": signer, "funder": funder or signer, "sig_type": sig_type,
+                acct = await self.api.resolve_account(signer)
+                self.secrets = {"signer": signer, "funder": acct["funder"], "sig_type": acct["sig_type"],
                                 "creds": {"apiKey": body["api_key"].strip(), "secret": body["api_secret"].strip(),
                                           "passphrase": body["api_passphrase"].strip()}}
-            elif self.secrets.get("creds"):
-                self.secrets["funder"] = funder or self.secrets.get("signer")
-                self.secrets["sig_type"] = sig_type
             else:
-                return web.json_response({"error": "请提供私钥，或手动提供 API 凭据"}, status=400)
+                return web.json_response({"error": "请提供私钥"}, status=400)
         except ApiError as e:
             return web.json_response({"error": f"Polymarket 拒绝了请求：{e}"}, status=502)
         except ImportError:

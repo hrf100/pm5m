@@ -2,6 +2,7 @@ import base64, hashlib, hmac, json, math, os, random, shutil, sys, tempfile, uni
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from pm5m import model, parsers, clobauth
+from pm5m.feeds import signature_type_from_code, POLY_PROXY_CODE, SAFE_PROXY_CODE, DEPOSIT_CODE_PREFIX
 from pm5m.book import Book, parse_market_events
 from pm5m.hub import Hub, Buf
 from pm5m.paper import PaperEngine, StrategyConfig
@@ -368,6 +369,16 @@ class TestRunnerEndToEnd(unittest.TestCase):
             self.assertTrue(eng.orders[0].official_side_won is False)
         finally:
             shutil.rmtree(d)
+
+
+class TestAccountCode(unittest.TestCase):
+    def test_signature_type_from_runtime(self):
+        self.assertEqual(signature_type_from_code("0x"), 0)
+        self.assertEqual(signature_type_from_code(""), 0)
+        self.assertEqual(signature_type_from_code(POLY_PROXY_CODE), 1)
+        self.assertEqual(signature_type_from_code("0x" + SAFE_PROXY_CODE), 2)
+        self.assertEqual(signature_type_from_code(DEPOSIT_CODE_PREFIX + "ab" * 20), 3)
+        self.assertIsNone(signature_type_from_code("deadbeef"))
 
 
 if __name__ == "__main__":
