@@ -157,6 +157,14 @@ details>summary::before{content:"▸ "}details[open]>summary::before{content:"�
     <div class="row"><input id="w_pk" type="password" class="wide" autocomplete="off" placeholder="私钥 0x…" style="flex:1;width:auto"><button onclick="saveWallet()">保存</button></div>
     <div class="row"><button class="ghost" onclick="refreshWallet()">刷新余额</button><button class="red" onclick="delWallet()">清除</button><span id="wmsg" class="note"></span></div>
     <div class="note">只填私钥，地址和类型自动识别，私钥不保存。</div>
+    <details>
+      <summary>修改登录密码</summary>
+      <label>当前<input id="pw_cur" type="password" autocomplete="current-password"></label>
+      <label>新的<input id="pw_new" type="password" autocomplete="new-password"></label>
+      <label>再输一次<input id="pw_new2" type="password" autocomplete="new-password"></label>
+      <div class="row"><button onclick="changePw()">修改</button><span id="pwmsg" class="note"></span></div>
+      <div class="note">用户名仍是 admin。改完浏览器会要求重新登录。</div>
+    </details>
   </section>
 
   <section class="card c6">
@@ -219,6 +227,13 @@ async function saveWallet(){
   try{await api('/api/wallet','POST',{private_key:$('w_pk').value});
     $('w_pk').value='';$('wmsg').textContent='已识别'}catch(e){$('wmsg').textContent=e.message}}
 async function delWallet(){if(confirm('清除服务器上保存的 API 凭据？')){await api('/api/wallet','DELETE');}}
+async function changePw(){
+  const nw=$('pw_new').value, ag=$('pw_new2').value;
+  if(nw!==ag){$('pwmsg').textContent='两次新密码不一致';return}
+  $('pwmsg').textContent='保存中…';
+  try{await api('/api/password','POST',{current:$('pw_cur').value,new:nw});
+    $('pwmsg').textContent='已修改，即将重新登录';setTimeout(()=>location.reload(),700)}
+  catch(e){$('pwmsg').textContent=e.message}}
 async function refreshWallet(){$('wmsg').textContent='刷新中…';try{await api('/api/wallet/refresh','POST',{});$('wmsg').textContent=''}catch(e){$('wmsg').textContent=e.message}}
 async function selftest(){
   $('selftest').textContent='检测中…';

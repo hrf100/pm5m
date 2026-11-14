@@ -240,7 +240,7 @@ if [[ "$CREATED_ENV" -eq 1 ]]; then
   echo "网页密码: ${PASS}"
   echo "已写入 ${ENV_FILE} 的 PM5M_PASSWORD（权限 600）。"
 else
-  echo "密码仍是 ${ENV_FILE} 里的 PM5M_PASSWORD。"
+  echo "密码仍是 ${ENV_FILE} 里的 PM5M_PASSWORD（若已在页面改过，以数据目录 web_password.txt 为准）。"
 fi
 echo "云安全组请放行 TCP ${PORT}。私钥写在 ${ENV_FILE}，然后 sudo systemctl restart pm5m"
 echo "日志: journalctl -u pm5m -f"

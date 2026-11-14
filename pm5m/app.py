@@ -21,7 +21,7 @@ from .hub import Hub
 from .paper import PaperEngine, StrategyConfig
 from .runner import Runner, WINDOW
 from .sysmon import SysMon
-from .store import DataStore, orders_to_csv
+from .store import DataStore, _atomic_write, orders_to_csv
 
 log = logging.getLogger("pm5m")
 STATIC = os.path.join(os.path.dirname(__file__), "static")
@@ -95,21 +95,29 @@ class App:
         except OSError as e:
             self.last_error = f"event log: {e}"
 
+    def _password_path(self) -> str:
+        return os.path.join(self.store.dir, "web_password.txt")
+
     def _load_password(self) -> str:
-        pw = os.environ.get("PM5M_PASSWORD")
-        path = os.path.join(self.store.dir, "web_password.txt")
+        """File wins over PM5M_PASSWORD, so a change made on the page survives restart."""
+        path = self._password_path()
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                pw = f.read().strip()
+            if pw:
+                return pw
+        pw = (os.environ.get("PM5M_PASSWORD") or "").strip()
         if pw:
             return pw
-        if os.path.exists(path):
-            with open(path) as f:
-                return f.read().strip()
         pw = secrets.token_urlsafe(12)
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            f.write(pw)
+        self._write_password(pw)
         print(f"\n[pm5m] 首次启动：已生成网页登录密码（用户名 admin）：{pw}\n"
               f"[pm5m] 保存在 {path}（权限 600）。也可用环境变量 PM5M_PASSWORD 指定。\n", flush=True)
         return pw
+
+    def _write_password(self, pw: str) -> None:
+        _atomic_write(self._password_path(), pw + "\n", 0o600)
+        self.password = pw
 
     def creds(self) -> Optional[dict]:
         c = self.secrets.get("creds")
@@ -221,7 +229,7 @@ class App:
         if h.startswith("Basic "):
             try:
                 user, _, pw = base64.b64decode(h[6:]).decode().partition(":")
-                ok = hmac.compare_digest(user, "admin") & hmac.compare_digest(pw, self.password)
+                ok = hmac.compare_digest(user, "admin") and _same(pw, self.password)
             except Exception:
                 ok = False
         if not ok:
@@ -413,6 +421,17 @@ class App:
         dest = self.store.reset_records(archive=bool(body.get("archive", True)), include_series=bool(body.get("include_series", False)))
         return web.json_response({"ok": True, "archived_to": dest})
 
+    async def h_password(self, request):
+        body = await request.json()
+        cur = body.get("current") or ""
+        new = (body.get("new") or "").strip()
+        if not _same(cur, self.password):
+            return web.json_response({"error": "当前密码不对"}, status=403)
+        if not (8 <= len(new) <= 128) or any(c in new for c in "\r\n\x00"):
+            return web.json_response({"error": "新密码需要 8 到 128 位，不能含换行"}, status=400)
+        self._write_password(new)
+        return web.json_response({"ok": True})
+
     async def h_selftest(self, request):
         res = []
 
@@ -474,6 +493,7 @@ class App:
         r.add_get("/api/sys", self.h_sys)
         r.add_post("/api/reset", self.h_reset)
         r.add_post("/api/selftest", self.h_selftest)
+        r.add_post("/api/password", self.h_password)
         app.on_startup.append(self.on_startup)
         app.on_cleanup.append(self.on_cleanup)
         return app
@@ -499,6 +519,13 @@ class App:
         self.flush()
         if self.session:
             await self.session.close()
+
+
+def _same(a: str, b: str) -> bool:
+    try:
+        return hmac.compare_digest(str(a), str(b))
+    except Exception:
+        return False
 
 
 def main() -> None:

@@ -28,7 +28,7 @@ sudo bash -c "curl -fsSL https://raw.githubusercontent.com/hrf100/pm5m/main/depl
 
 脚本会装 Python 3.9+ 与依赖、创建系统用户 `pm5m`、代码放到 `/opt/pm5m`、数据放到 `/var/lib/pm5m`、生成 `/etc/pm5m.env`（随机网页密码，权限 600）、注册并启动 `pm5m.service`。应用监听 `0.0.0.0:8080`，浏览器打开 `http://服务器IP:8080`。重复执行会按 GitHub `main` 升级，不会改已有密码和私钥；若旧配置还写着 `127.0.0.1`，会改成直接监听。
 
-装完：用户名 `admin`，密码在安装输出和 `/etc/pm5m.env` 的 `PM5M_PASSWORD`。私钥只写 `PM5M_PRIVATE_KEY`，然后 `sudo systemctl restart pm5m`。资金地址和账户类型会自动识别。云厂商安全组要放行 TCP 8080。日志：`journalctl -u pm5m -f`。
+装完：用户名 `admin`，初始密码在安装输出和 `/etc/pm5m.env` 的 `PM5M_PASSWORD`。之后在页面「钱包 → 修改登录密码」改掉的密码存在数据目录的 `web_password.txt`，重启后优先于环境变量。私钥只写 `PM5M_PRIVATE_KEY`，然后 `sudo systemctl restart pm5m`。资金地址和账户类型会自动识别。云厂商安全组要放行 TCP 8080。日志：`journalctl -u pm5m -f`。
 
 ### 本地开发
 

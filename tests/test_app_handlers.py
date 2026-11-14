@@ -67,6 +67,18 @@ class TestHandlers(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.d)
 
+    def test_change_password_persists_over_env(self):
+        r = run(self.app.h_password(Req({"current": "wrong", "new": "newpassword"})))
+        self.assertEqual(r.status, 403)
+        r = run(self.app.h_password(Req({"current": "pw", "new": "short"})))
+        self.assertEqual(r.status, 400)
+        r = run(self.app.h_password(Req({"current": "pw", "new": "newpassword"})))
+        self.assertEqual(r.status, 200)
+        with open(os.path.join(self.d, "web_password.txt"), encoding="utf-8") as f:
+            self.assertEqual(f.read().strip(), "newpassword")
+        again = App(self.d)          # PM5M_PASSWORD is still "pw"; the file wins
+        self.assertEqual(again.password, "newpassword")
+
     def test_auth(self):
         async def ok_handler(r):
             return sys.modules["aiohttp"].web.json_response({"ok": 1})
