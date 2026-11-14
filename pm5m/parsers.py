@@ -125,6 +125,8 @@ def parse_balance(d: dict) -> Optional[float]:
 
 def parse_positions(rows) -> List[dict]:
     out = []
+    if isinstance(rows, dict):
+        rows = rows.get("data")
     if not isinstance(rows, list):
         return out
     for r in rows:
@@ -133,11 +135,11 @@ def parse_positions(rows) -> List[dict]:
         out.append({
             "title": r.get("title") or r.get("slug"),
             "outcome": r.get("outcome"),
-            "size": _f(r.get("size")),
-            "avg_price": _f(r.get("avgPrice")),
-            "cur_price": _f(r.get("curPrice")),
-            "value": _f(r.get("currentValue")),
-            "pnl": _f(r.get("cashPnl")),
+            "size": _f(r.get("current_size", r.get("size"))),
+            "avg_price": _f(r.get("avg_price", r.get("avgPrice"))),
+            "cur_price": _f(r.get("current_price", r.get("curPrice"))),
+            "value": _f(r.get("current_value", r.get("currentValue"))),
+            "pnl": _f(r.get("total_pnl", r.get("unrealized_pnl", r.get("cashPnl")))),
             "redeemable": bool(r.get("redeemable")),
         })
     return out

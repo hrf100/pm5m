@@ -448,10 +448,10 @@ class App:
             addr = self.secrets.get("funder") or self.secrets.get("signer") or "0x" + "0" * 40
             return f"pUSD({mask(addr, 6)}) = {await self.api.onchain_pusd(addr):.4f}"
 
-        await t("地域限制 geoblock", geo)
-        await t("服务器时钟", skew)
-        await t("Gamma 当前市场", gamma)
-        await t("Polygon RPC / pUSD", rpc)
+        await t("地域限制 geoblock", geo())
+        await t("服务器时钟", skew())
+        await t("Gamma 当前市场", gamma())
+        await t("Polygon RPC / pUSD", rpc())
         for k, v in self.hub.status.items():
             ok = v.state == "connected" and v.last_msg and time.time() - v.last_msg < 30
             res.append({"name": f"feed:{k}", "ok": bool(ok), "detail": f"{v.state} {v.error or v.extra}"[:200], "ms": 0})

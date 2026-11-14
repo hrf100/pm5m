@@ -109,11 +109,18 @@ class Api:
         return parsers.parse_gamma_market(d)
 
     async def positions(self, addr: str) -> List[dict]:
-        d, _ = await self.get(f"{DATA_API}/positions", params={"user": addr, "sizeThreshold": "0", "limit": "200"})
-        return parsers.parse_positions(d)
+        d, _ = await self.get(f"{DATA_API}/v2/positions", params={"user": addr, "limit": "200"})
+        rows = d.get("data") if isinstance(d, dict) else d
+        return parsers.parse_positions(rows)
 
     async def value(self, addr: str) -> Optional[float]:
-        d, _ = await self.get(f"{DATA_API}/value", params={"user": addr})
+        d, _ = await self.get(f"{DATA_API}/v2/value", params={"user": addr})
+        if isinstance(d, dict):
+            payload = d.get("data", d)
+            if isinstance(payload, dict):
+                return parsers._f(payload.get("value"))
+            if isinstance(payload, list) and payload:
+                return parsers._f(payload[0].get("value"))
         if isinstance(d, list) and d:
             return parsers._f(d[0].get("value"))
         return None

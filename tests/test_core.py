@@ -121,6 +121,12 @@ class TestParsers(unittest.TestCase):
         self.assertAlmostEqual(parsers.parse_balance({"balance": "2179236", "allowances": {}}), 2.179236)
         rows = parsers.parse_positions([{"title": "X", "outcome": "Up", "size": 10, "avgPrice": 0.07, "currentValue": 1.2, "cashPnl": 0.5}])
         self.assertEqual(rows[0]["outcome"], "Up")
+        self.assertEqual(rows[0]["size"], 10)
+        rows = parsers.parse_positions({"data": [{"title": "Y", "outcome": "Yes", "current_size": 2,
+                                                 "avg_price": 0.4, "current_price": 0.5, "current_value": 1.0,
+                                                 "total_pnl": 0.2, "redeemable": False}]})
+        self.assertEqual(rows[0]["size"], 2)
+        self.assertEqual(rows[0]["pnl"], 0.2)
         self.assertTrue(parsers.is_address("0x" + "a" * 40)); self.assertFalse(parsers.is_address("0x12"))
 
 
