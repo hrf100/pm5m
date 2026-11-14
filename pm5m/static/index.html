@@ -27,6 +27,11 @@ button{background:#22406a;color:#fff;border:1px solid #2f5a96;border-radius:5px;
 button.red{background:#6a2230;border-color:#96303f}button.grn{background:#1f5a3f;border-color:#2c8059}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:4px 16px}
 .legend span{margin-right:12px}.note{font-size:12px;color:var(--mut)}
+.sysbar{display:flex;border-bottom:1px solid var(--line);background:var(--card)}
+.sysbar span{flex:1;padding:6px 14px;border-right:1px solid var(--line);min-width:0}
+.sysbar span:last-child{border-right:0}
+.sysbar i{display:block;font-style:normal;color:var(--mut);font-size:11px}
+.sysbar b{font-weight:600;font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
@@ -34,6 +39,13 @@ button.red{background:#6a2230;border-color:#96303f}button.grn{background:#1f5a3f
   <h1>Polymarket BTC 5 分钟 · 纸面测试</h1><span class="badge">PAPER · 不发送真实订单</span>
   <span id="feeds"></span><span id="geo" class="chip"></span><span id="clock" class="mut"></span>
 </header>
+<div class="sysbar">
+  <span><i>CPU</i><b id="sy_cpu">-</b></span>
+  <span><i>内存</i><b id="sy_mem">-</b></span>
+  <span><i>收 KB/s</i><b id="sy_rx">-</b></span>
+  <span><i>发 KB/s</i><b id="sy_tx">-</b></span>
+  <span><i>盘</i><b id="sy_disk">-</b></span>
+</div>
 <main>
   <section class="card c4">
     <h2>当前盘口</h2>
@@ -106,17 +118,6 @@ button.red{background:#6a2230;border-color:#96303f}button.grn{background:#1f5a3f
     <div id="errs" class="note bad"></div>
   </section>
 
-  <section class="card c12">
-    <h2>资源占用（最近 1 小时，每 2 秒采样）　<span class="note" id="sysnote"></span></h2>
-    <div class="grid2" style="grid-template-columns:1fr 1fr 1fr">
-      <div><div class="note">CPU（系统 % / 本进程 % 占整机）</div><canvas id="sc1" style="height:170px"></canvas></div>
-      <div><div class="note">内存（系统已用 %）</div><canvas id="sc2" style="height:170px"></canvas></div>
-      <div><div class="note">流量（KB/s）：网卡收/发、应用行情、网页输出</div><canvas id="sc3" style="height:170px"></canvas></div>
-    </div>
-    <div class="legend note"><span style="color:#5aa9ff">━ 系统CPU</span><span style="color:#f5b84b">━ 本进程CPU</span><span style="color:#3ecf8e">━ 内存</span><span style="color:#5aa9ff">━ 网卡收</span><span style="color:#f5b84b">━ 网卡发</span><span style="color:#9aa">━ 行情接收</span><span style="color:#c792ea">━ 网页输出</span></div>
-    <table style="margin-top:8px"><thead><tr><th>指标</th><th>当前</th><th>1小时均值</th><th>1小时峰值</th></tr></thead><tbody id="sysstats"></tbody></table>
-    <div class="kv" style="margin-top:8px" id="systot"></div>
-  </section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -231,27 +232,18 @@ async function pollState(){try{render(await api('/api/state'))}catch(e){$('errs'
 async function pollSeries(){try{lastSeries=await api('/api/series');renderCharts()}catch(e){}setTimeout(pollSeries,2000)}
 $('full').onchange=renderCharts;window.onresize=renderCharts;pollState();pollSeries();
 
-const KB=v=>v==null?'-':(v/1024).toFixed(1)+' KB/s';
-function sline(name,key,fmt){const x=window._sys?.stats?.[key]||{};return `<tr><td>${name}</td><td>${fmt(x.now)}</td><td>${fmt(x.avg)}</td><td>${fmt(x.max)}</td></tr>`}
-function bytesStr(b){if(b==null)return '-';const u=['B','KB','MB','GB','TB'];let i=0;while(b>=1024&&i<4){b/=1024;i++}return b.toFixed(i?2:0)+' '+u[i]}
+function bytesStr(b){if(b==null)return '-';const u=['B','KB','MB','GB','TB'];let i=0;while(b>=1024&&i<4){b/=1024;i++}return b.toFixed(i?1:0)+u[i]}
 function renderSys(d){
-  window._sys=d;const t=d.series.t;if(!t.length){$('sysnote').textContent='采样中…';return}
-  const now=d.now, xs=t.map(v=>v-now);
-  const mk=k=>d.series[k].map((v,i)=>[xs[i],v]);
-  const common={xmin:-3600,xmax:0,yfmt:v=>v.toFixed(0)};
-  drawChart($('sc1'),{...common,ymin:0,ymax:100,series:[{color:'#5aa9ff',pts:mk('cpu_sys')},{color:'#f5b84b',pts:mk('cpu_proc')}]});
-  drawChart($('sc2'),{...common,ymin:0,ymax:100,series:[{color:'#3ecf8e',pts:mk('mem_sys')}]});
-  const kb=k=>mk(k).map(([x,v])=>[x,v==null?null:v/1024]);
-  drawChart($('sc3'),{...common,ymin:0,series:[{color:'#5aa9ff',pts:kb('rx_bps')},{color:'#f5b84b',pts:kb('tx_bps')},{color:'#9aa',pts:kb('feed_bps')},{color:'#c792ea',pts:kb('http_bps')}]});
-  $('sysnote').textContent=`采样 ${d.window_s}s · ${d.ncpu} 核`;
-  $('sysstats').innerHTML=sline('系统 CPU','cpu_sys',v=>v==null?'-':v.toFixed(1)+' %')+sline('本进程 CPU（占整机）','cpu_proc',v=>v==null?'-':v.toFixed(2)+' %')+
-    sline('本进程占用核数','cores',v=>v==null?'-':v.toFixed(3))+sline('系统内存已用','mem_sys',v=>v==null?'-':v.toFixed(1)+' %')+sline('本进程内存 RSS','rss_mb',v=>v==null?'-':v.toFixed(1)+' MB')+
-    sline('网卡接收（整机）','rx_bps',KB)+sline('网卡发送（整机）','tx_bps',KB)+sline('行情接收（应用）','feed_bps',KB)+sline('网页输出（应用）','http_bps',KB);
-  const T=d.totals_since_start;
-  $('systot').innerHTML=[['网卡接收 累计',bytesStr(T.nic_rx_bytes)],['网卡发送 累计',bytesStr(T.nic_tx_bytes)],['行情接收 累计',bytesStr(T.feed_bytes)],['网页输出 累计',bytesStr(T.http_out_bytes)],
-    ['磁盘剩余',bytesStr(d.disk.free_bytes)],['数据目录大小',bytesStr(d.disk.data_dir_bytes)]].map(([k,v])=>`<div>${k}</div><div>${v}</div>`).join('');
+  const s=d.stats||{}, n=k=>s[k]?s[k].now:null;
+  const pct=v=>v==null?'-':Math.round(v)+'%';
+  const kb=v=>v==null?'-':(v/1024).toFixed(1);
+  $('sy_cpu').textContent=pct(n('cpu_sys'));
+  $('sy_mem').textContent=pct(n('mem_sys'));
+  $('sy_rx').textContent=kb(n('rx_bps'));
+  $('sy_tx').textContent=kb(n('tx_bps'));
+  $('sy_disk').textContent=bytesStr(d.disk&&d.disk.free_bytes);
 }
-async function pollSys(){try{renderSys(await api('/api/sys'))}catch(e){$('sysnote').textContent='资源数据获取失败: '+e.message}setTimeout(pollSys,2000)}
+async function pollSys(){try{renderSys(await api('/api/sys'))}catch(e){}setTimeout(pollSys,2000)}
 pollSys();
 </script>
 </body>
