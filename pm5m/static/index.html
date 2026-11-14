@@ -25,6 +25,12 @@ input,select{background:#0c1015;color:var(--tx);border:1px solid var(--line);bor
 input[type=checkbox]{width:auto}input.wide{width:100%}
 button{background:#22406a;color:#fff;border:1px solid #2f5a96;border-radius:5px;padding:5px 10px;cursor:pointer}button:hover{background:#2a4f85}
 button.red{background:#6a2230;border-color:#96303f}button.grn{background:#1f5a3f;border-color:#2c8059}
+.sw{display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+.sw input{display:none}
+.sw .tr{width:40px;height:22px;border-radius:11px;background:#3a3f4b;position:relative;transition:background .15s}
+.sw .tr::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}
+.sw input:checked+.tr{background:#2c8059}
+.sw input:checked+.tr::after{left:21px}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:4px 16px}
 .legend span{margin-right:12px}.note{font-size:12px;color:var(--mut)}
 .sysbar{display:flex;border-bottom:1px solid var(--line);background:var(--card)}
@@ -75,7 +81,7 @@ button.red{background:#6a2230;border-color:#96303f}button.grn{background:#1f5a3f
 
   <section class="card c5">
     <h2>策略参数（挂 Maker 买单，每单约 $<span id="unitlbl">5</span>）</h2>
-    <div class="row"><button class="grn" onclick="strat('start')">开始</button><button class="red" onclick="strat('stop')">停止并撤单</button><span id="enabled"></span></div>
+    <div class="row"><label class="sw"><input type="checkbox" id="runsw" onchange="toggleStrat(this)"><span class="tr"></span><span id="enabled"></span></label></div>
     <div id="cfg" class="grid2"></div>
     <div class="row"><button onclick="saveCfg()">保存参数</button><span class="note" id="cfgmsg"></span></div>
     <div class="note">思路：窗口后段，某一侧买一价落在区间内且「模型概率×折扣 ≥ 价格+边际」时，在买一挂单排队；只有真实成交才会成交。</div>
@@ -133,7 +139,11 @@ function buildCfg(c){
 async function saveCfg(){
   const s={};CFG.forEach(([k,l,o])=>{const e=$('c_'+k);s[k]=o===true?e.checked:e.value});
   try{await api('/api/settings','POST',{strategy:s,binance_enabled:$('c_binance').checked,record_series:$('c_rec').checked});$('cfgmsg').textContent='已保存';}catch(e){$('cfgmsg').textContent='失败: '+e.message}}
-async function strat(a){try{await api('/api/strategy/'+a,'POST',{})}catch(e){alert(e.message)}}
+async function toggleStrat(el){
+  const on=el.checked;el.disabled=true;
+  try{await api('/api/strategy/'+(on?'start':'stop'),'POST',{})}catch(e){el.checked=!on;alert(e.message)}
+  finally{el.disabled=false}
+}
 async function resetRec(){
   if(!confirm('确定重置所有纸面交易记录？'+($('arch').checked?'（旧记录会先归档到 data/archive）':'（不归档，将永久删除）')))return;
   try{const r=await api('/api/reset','POST',{confirm:true,archive:$('arch').checked,include_series:$('rser').checked});alert('已重置'+(r.archived_to?'，归档到 '+r.archived_to:''))}catch(e){alert(e.message)}}
@@ -197,7 +207,7 @@ function render(st){
   $('pm').textContent=m?(m.p_up*100).toFixed(1)+'% / '+(m.p_down*100).toFixed(1)+'%':'-';
   const lf=st.last_final;$('lastfinal').textContent=lf?`${lf.up?'Up':'Down'}（终值 ${usd(lf.value)} vs B ${usd(lf.B)}）`:'-';
   $('books').innerHTML=['Up','Down'].map(s=>{const b=st.books[s];return b?`<tr><td style="color:var(--${s==='Up'?'up':'dn'})">${s}</td><td>${f2(b.bid)}</td><td>${f2(b.bid_size,0)}</td><td>${f2(b.ask)}</td><td>${f2(b.ask_size,0)}</td></tr>`:`<tr><td>${s}</td><td colspan=4 class="mut">无数据</td></tr>`}).join('');
-  $('smsg').textContent=st.strategy.msg;$('enabled').innerHTML=st.strategy.enabled?'<span class="ok">● 运行中</span>':'<span class="mut">○ 已停止</span>';$('unitlbl').textContent=st.strategy.cfg.unit_usd;
+  $('smsg').textContent=st.strategy.msg;$('enabled').innerHTML=st.strategy.enabled?'<span class="ok">运行中</span> <span class="mut">关闭即撤单</span>':'<span class="mut">已停止</span>';if(!$('runsw').disabled)$('runsw').checked=!!st.strategy.enabled;$('unitlbl').textContent=st.strategy.cfg.unit_usd;
   const s=st.stats,pc=x=>x==null?'-':(x*100).toFixed(1)+'%';
   $('stats').innerHTML=[['信号数',s.signals],['已结算',s.settled],['成交笔数',s.filled],['挂单成交率',pc(s.fill_rate)],['成交后翻转率',pc(s.win_rate)],['平均成交价',s.avg_price==null?'-':s.avg_price.toFixed(3)],
     ['盈亏平衡概率',s.breakeven==null?'-':pc(s.breakeven)],['未成交单的翻转率',pc(s.unfilled_flip_rate)],['累计盈亏',usd(s.pnl)],['模拟资金',usd(s.bankroll)],['当前敞口',usd(s.exposure)],['挂单中',s.resting]]
