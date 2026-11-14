@@ -23,11 +23,17 @@ BINANCE_WS = ["wss://stream.binance.com:9443/ws/btcusdt@trade", "wss://data-stre
 PUSD = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
 POLYGON_RPCS = ["https://polygon-bor-rpc.publicnode.com", "https://polygon-rpc.com"]
 UA = {"User-Agent": "pm5m-paper/0.1"}
-# Runtime code of Polymarket account wallets. Deposit wallets share an ERC-1967 prefix; the implementation address may change.
-POLY_PROXY_CODE = "363d3d373d3d3d363d7344e999d5c2f66ef0861317f9a4805ac2e90aeb4f5af43d82803e903d91602b57fd5bf3"
-SAFE_PROXY_CODE = ("6080604052600080546001600160a01b0316813563530ca43760e11b1415602857808252602082f35b3682833781823684845af490503d82833e806041573d82fd5b"
-                   "503d81f3fea264697066735822122015938e3bf2c49f5df5c1b7f9569fa85cc5d6f3074bb258a2dc0c7e299bc9e33664736f6c63430008040033")
+# Runtime shapes, not one pinned implementation. Extra bytes (compiler metadata, beacon args) are ignored.
+EIP1167_PREFIX = "363d3d373d3d3d363d73"
+EIP1167_SUFFIX = "5af43d82803e903d91602b57fd5bf3"
+POLY_PROXY_CODE = EIP1167_PREFIX + "44e999d5c2f66ef0861317f9a4805ac2e90aeb4f" + EIP1167_SUFFIX
+SAFE_PROXY_PREFIX = ("6080604052600080546001600160a01b0316813563530ca43760e11b1415602857808252602082f35b3682833781823684845af490503d82833e806041573d82fd5b"
+                     "503d81f3")
+SAFE_PROXY_CODE = SAFE_PROXY_PREFIX + "fea264697066735822122015938e3bf2c49f5df5c1b7f9569fa85cc5d6f3074bb258a2dc0c7e299bc9e33664736f6c63430008040033"
 DEPOSIT_CODE_PREFIX = "363d3d373d3d363d7f360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc545af43d6000803e6038573d6000fd5b3d6000f3"
+# ERC-1967 beacon proxy used by current Polymarket deposit wallets. Args are appended after this runtime.
+DEPOSIT_BEACON_PREFIX = ("363d3d373d3d363d602036600436635c60da1b60e01b36527fa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6c"
+                         "b3582b35133d50545afa5036515af43d6000803e604d573d6000fd5b3d6000f3")
 
 
 def signature_type_from_code(code: str) -> Optional[int]:
@@ -35,11 +41,11 @@ def signature_type_from_code(code: str) -> Optional[int]:
     code = (code or "").lower().removeprefix("0x")
     if code == "":
         return 0
-    if code == POLY_PROXY_CODE:
+    if code.startswith(EIP1167_PREFIX) and code[60:60 + len(EIP1167_SUFFIX)] == EIP1167_SUFFIX:
         return 1
-    if code == SAFE_PROXY_CODE:
+    if code.startswith(SAFE_PROXY_PREFIX):
         return 2
-    if code.startswith(DEPOSIT_CODE_PREFIX):
+    if code.startswith(DEPOSIT_CODE_PREFIX) or code.startswith(DEPOSIT_BEACON_PREFIX):
         return 3
     return None
 

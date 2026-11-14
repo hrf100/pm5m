@@ -2,7 +2,8 @@ import base64, hashlib, hmac, json, math, os, random, shutil, sys, tempfile, uni
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from pm5m import model, parsers, clobauth
-from pm5m.feeds import signature_type_from_code, POLY_PROXY_CODE, SAFE_PROXY_CODE, DEPOSIT_CODE_PREFIX
+from pm5m.feeds import (signature_type_from_code, POLY_PROXY_CODE, SAFE_PROXY_CODE,
+                       DEPOSIT_CODE_PREFIX, DEPOSIT_BEACON_PREFIX, EIP1167_PREFIX, EIP1167_SUFFIX)
 from pm5m.book import Book, parse_market_events
 from pm5m.hub import Hub, Buf
 from pm5m.paper import PaperEngine, StrategyConfig
@@ -378,6 +379,8 @@ class TestAccountCode(unittest.TestCase):
         self.assertEqual(signature_type_from_code(POLY_PROXY_CODE), 1)
         self.assertEqual(signature_type_from_code("0x" + SAFE_PROXY_CODE), 2)
         self.assertEqual(signature_type_from_code(DEPOSIT_CODE_PREFIX + "ab" * 20), 3)
+        self.assertEqual(signature_type_from_code("0x" + DEPOSIT_BEACON_PREFIX + "00" * 64), 3)
+        self.assertEqual(signature_type_from_code(EIP1167_PREFIX + "ab" * 20 + EIP1167_SUFFIX), 1)
         self.assertIsNone(signature_type_from_code("deadbeef"))
 
 
