@@ -232,5 +232,13 @@ class Runner:
         bn = hub.binance.last()
         basis = (bn[1] - spot[1]) if bn and now - bn[0] < 10 else None
         return {"slug": self.slug_for(S), "tau": T - now, "B": res["B_mean"], "spot": spot[1] + off,
-                "sigma_rel": sigma, "p_up": res["p_up"], "tokens": {"Up": m["up"], "Down": m["down"]},
+                "sigma_rel": sigma, "p_up": res["p_up"], "gap": res["gap"], "bn_move": self.binance_move(now),
+                "tokens": {"Up": m["up"], "Down": m["down"]},
                 "books": {"Up": ub, "Down": db}, "binance": bn[1] if bn else None, "basis": basis, "model": res}
+
+    def binance_move(self, now: float, lookback: float = 3.0) -> Optional[float]:
+        """Binance price change over the last few seconds (USD). Binance leads Chainlink by ~0.5-2 s."""
+        pts = self.hub.binance.since(now - lookback - 0.5)
+        if len(pts) < 2 or now - pts[-1][0] > 2.0:
+            return None
+        return pts[-1][1] - pts[0][1]

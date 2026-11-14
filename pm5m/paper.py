@@ -1,4 +1,4 @@
-"""Paper-trading engine: resting maker bids on the cheap side, simulated fills, settlement.
+"""Paper-trading engine: resting maker bids (default: the favourite late in the window), simulated fills, settlement.
 
 Fill model (documented limitations in README):
   * We join the best bid. queue_ahead = visible size at that level when placed.
@@ -14,16 +14,24 @@ from dataclasses import asdict, dataclass, field, fields
 from typing import Callable, Dict, List, Optional
 
 
+STRATEGY_VERSION = 2   # bump when defaults change meaning; older saved strategies are replaced
+
+
 @dataclass
 class StrategyConfig:
     enabled: bool = False
     unit_usd: float = 5.0
-    min_price: float = 0.02
-    max_price: float = 0.10
-    min_remaining: float = 8.0         # do not place with less than this many seconds left
-    max_remaining: float = 420.0       # ...or more than this (allows entry up to 120 s before open)
+    min_price: float = 0.75            # favourite side: high hit rate, maker fills pay no taker fee
+    max_price: float = 0.95
+    min_remaining: float = 10.0        # do not place with less than this many seconds left
+    max_remaining: float = 150.0       # ...or more than this
     margin: float = 0.02               # required (p_adj - price)
-    discount: float = 0.85             # adverse-selection haircut on model probability
+    discount: float = 1.0              # multiplicative haircut on model probability
+    loss_mult: float = 1.5             # adverse selection: assume the losing chance is this much larger
+    min_gap_usd: float = 20.0          # expected settlement minus B must favour our side by at least this
+    max_sigma5m: float = 0.004         # skip when realised 5-minute vol is above this (fraction)
+    max_disagree: float = 0.12         # skip when the model is this much more confident than the book mid
+    fast_move_usd: float = 25.0        # Binance move against us over ~3 s: do not place, cancel resting (0 = off)
     ttl_s: float = 45.0
     cancel_below_remaining: float = 8.0
     max_orders_per_window: int = 1
@@ -58,6 +66,11 @@ class StrategyConfig:
         c.min_price = min(max(c.min_price, 0.01), 0.98)
         c.max_price = min(max(c.max_price, c.min_price), 0.98)
         c.discount = min(max(c.discount, 0.0), 1.5)
+        c.loss_mult = min(max(c.loss_mult, 0.5), 5.0)
+        c.min_gap_usd = max(c.min_gap_usd, 0.0)
+        c.max_sigma5m = max(c.max_sigma5m, 0.0)
+        c.max_disagree = max(c.max_disagree, 0.0)
+        c.fast_move_usd = max(c.fast_move_usd, 0.0)
         c.queue_model = c.queue_model if c.queue_model in ("conservative", "optimistic") else "conservative"
         c.sides = c.sides if c.sides in ("both", "up", "down") else "both"
         c.max_orders_per_window = max(1, min(c.max_orders_per_window, 5))
@@ -171,6 +184,16 @@ class PaperEngine:
     def bankroll(self) -> float:
         return self.cfg.start_bankroll + self.realized()
 
+    def adjusted(self, p: float) -> float:
+        c = self.cfg
+        return max(0.0, 1.0 - (1.0 - p) * c.loss_mult) * c.discount
+
+    def fast_move_against(self, ctx: dict, side: str) -> bool:
+        mv, lim = ctx.get("bn_move"), self.cfg.fast_move_usd
+        if not lim or mv is None:
+            return False
+        return mv <= -lim if side == "Up" else mv >= lim
+
     def set_enabled(self, on: bool) -> None:
         self.cfg.enabled = on
         if not on:
@@ -187,6 +210,9 @@ class PaperEngine:
         placed_here = [o for o in self.orders if o.slug == ctx["slug"]]
         if len(placed_here) >= c.max_orders_per_window:
             return "本窗口已达下单上限"
+        s5 = (ctx.get("sigma_rel") or 0.0) * math.sqrt(300)
+        if c.max_sigma5m and s5 > c.max_sigma5m:
+            return f"波动过大（5 分钟 σ {s5 * 100:.2f}% > {c.max_sigma5m * 100:.2f}%），暂停"
         sides = ["Up", "Down"] if c.sides == "both" else [c.sides.capitalize()]
         reasons = []
         for side in sides:
@@ -204,8 +230,20 @@ class PaperEngine:
             if ask is not None and ask <= bid:
                 reasons.append(f"{side}: 盘口交叉")
                 continue
+            gap = ctx.get("gap")
+            if gap is not None and c.min_gap_usd:
+                lead = gap if side == "Up" else -gap
+                if lead < c.min_gap_usd:
+                    reasons.append(f"{side}: 领先 {lead:+.0f} 美元 < {c.min_gap_usd:.0f}")
+                    continue
+            if self.fast_move_against(ctx, side):
+                reasons.append(f"{side}: Binance 急动反向 {ctx['bn_move']:+.0f}")
+                continue
             p = ctx["p_up"] if side == "Up" else 1.0 - ctx["p_up"]
-            p_adj = p * c.discount
+            if ask is not None and c.max_disagree and p - (bid + ask) / 2.0 > c.max_disagree:
+                reasons.append(f"{side}: 模型 {p:.2f} 比盘口 {(bid + ask) / 2:.2f} 乐观太多，跳过")
+                continue
+            p_adj = self.adjusted(p)
             if p_adj < bid + c.margin:
                 reasons.append(f"{side}: 优势不足（模型 {p_adj:.3f} < 价格 {bid:.2f}+{c.margin:.2f}）")
                 continue
@@ -245,9 +283,11 @@ class PaperEngine:
                 self._cancel(o, "ttl")
             elif ctx["tau"] < c.cancel_below_remaining:
                 self._cancel(o, "too_late")
+            elif self.fast_move_against(ctx, o.side):
+                self._cancel(o, "fast_move")
             else:
                 p = ctx["p_up"] if o.side == "Up" else 1.0 - ctx["p_up"]
-                if p * c.discount < o.price + c.margin * 0.5:
+                if self.adjusted(p) < o.price + c.margin * 0.5:
                     self._cancel(o, "edge_lost")
 
     def cancel_all(self, reason: str) -> None:
@@ -361,4 +401,23 @@ class PaperEngine:
             "bankroll": round(self.bankroll(), 4),
             "exposure": round(self.exposure(), 4),
             "resting": sum(1 for o in self.orders if o.is_resting),
+            "buckets": self.buckets(filled),
         }
+
+    BUCKET_EDGES = (0.0, 0.5, 0.75, 0.80, 0.85, 0.90, 0.95, 1.0)
+
+    def buckets(self, filled: List[Order]) -> List[dict]:
+        """Hit rate vs average price per entry-price band. Hit rate above avg price (minus rebate) = profitable band."""
+        out = []
+        e = self.BUCKET_EDGES
+        for lo, hi in zip(e, e[1:]):
+            rows = [o for o in filled if lo <= o.price < hi or (hi == 1.0 and o.price == 1.0)]
+            if not rows:
+                continue
+            sh = sum(o.filled for o in rows)
+            avg = sum(o.cost for o in rows) / sh
+            reb = sum(o.rebate for o in rows) / sh
+            wins = sum(1 for o in rows if o.side_won)
+            out.append({"lo": lo, "hi": hi, "n": len(rows), "wins": wins, "win_rate": wins / len(rows),
+                        "avg_price": avg, "breakeven": avg - reb, "pnl": round(sum(o.pnl or 0.0 for o in rows), 4)})
+        return out

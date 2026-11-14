@@ -140,6 +140,8 @@ details>summary::before{content:"▸ "}details[open]>summary::before{content:"�
   </section>
 
   <section class="card c8">
+    <h2>分档命中率<span class="r note">命中率高于保本线才赚钱</span></h2>
+    <table style="margin-bottom:10px"><thead><tr><th>买入价</th><th>笔数</th><th>命中率</th><th>保本线</th><th>差距</th><th>盈亏</th></tr></thead><tbody id="buckets"></tbody></table>
     <h2>订单<span class="r note" id="ordsum"></span></h2>
     <div class="scroll"><table><thead><tr><th>时间</th><th>方向</th><th>价</th><th>股数</th><th>成交</th><th>状态</th><th>下单剩余</th><th>模型</th><th>结果</th><th>盈亏</th></tr></thead><tbody id="orders"></tbody></table></div>
     <details><summary>更多统计 / 记录管理</summary>
@@ -171,7 +173,7 @@ details>summary::before{content:"▸ "}details[open]>summary::before{content:"�
     <h2>策略参数<span class="r note" id="cfgsum"></span></h2>
     <div id="cfg" class="grid2"></div>
     <div class="row"><button onclick="saveCfg()">保存参数</button><span class="note" id="cfgmsg"></span></div>
-    <div class="note">窗口后段，某侧买一落在价格区间，且 模型概率 × 折扣 ≥ 价格 + 边际 时挂买单排队，按真实成交撮合。</div>
+    <div class="note">默认只在窗口最后 150 秒挂热门侧（0.75–0.95）。要同时满足：现价领先基准够远、波动不大、模型没有比盘口乐观太多、Binance 没有反向急动，且 1 −（1 − 模型概率）× 输面放大倍数 ≥ 价格 + 边际。只挂单不吃单，按真实成交撮合。</div>
   </section>
 
   <section class="card c6">
@@ -200,7 +202,8 @@ async function api(path,method='GET',body){
   if(!r.ok)throw new Error((j&&j.error)||('HTTP '+r.status));return j}
 
 const CFG=[['unit_usd','每单金额 $'],['min_price','价格下限'],['max_price','价格上限'],['min_remaining','最少剩余秒'],['max_remaining','最多剩余秒'],
-['margin','边际 (p−价)'],['discount','逆向选择折扣'],['ttl_s','挂单存活 s'],['cancel_below_remaining','剩余<此值撤单'],['max_orders_per_window','每窗口最多单数'],
+['margin','边际 (p−价)'],['loss_mult','输面放大倍数'],['min_gap_usd','最少领先 $'],['max_sigma5m','σ 上限(小数)'],['max_disagree','模型比盘口最多乐观'],
+['fast_move_usd','Binance 3秒急动撤单 $'],['discount','概率折扣'],['ttl_s','挂单存活 s'],['cancel_below_remaining','剩余<此值撤单'],['max_orders_per_window','每窗口最多单数'],
 ['sides','方向',['both','up','down']],['sigma5m','5分钟σ默认值(小数)'],['vol_mult','波动放大倍数'],['use_realized_vol','用实时波动',true],
 ['queue_model','排队模型',['conservative','optimistic']],['latency_ms','延迟 ms'],['start_bankroll','起始资金 $'],['max_exposure','最大敞口 $']];
 let cfgLoaded=false;
@@ -275,6 +278,7 @@ function renderCharts(){
 }
 const FEED_NAME={polybolt:'Chainlink',market_ws:'盘口',binance:'Binance',rtds:'RTDS'};
 function feedOk(f){return f.state==='connected'&&f.age_s!=null&&f.age_s<20}
+const REASON={ttl:'到期',too_late:'太晚',edge_lost:'优势消失',fast_move:'急动撤单',stopped:'停止',window_end:'窗口结束',restart:'重启',shutdown:'关机'};
 const STATUS={open:['挂单','open'],partial:['部分成交','open'],filled:['成交','fill'],cancelled:['已撤','off'],expired:['过期','off'],aborted:['中止','off']};
 
 function render(st){
@@ -309,7 +313,10 @@ function render(st){
   $('k_pnl').innerHTML=`<span class="${cls(s.pnl)}">${sgnUsd(s.pnl)}</span>`;
   $('k_pnl2').textContent=start?('收益率 '+pc(s.pnl/start)):'';
   $('k_bank').textContent=usd(s.bankroll);$('k_bank2').textContent='起始 '+usd(start)+' · 敞口 '+usd(s.exposure);
-  $('k_win').textContent=pc(s.win_rate);$('k_win2').textContent=`${s.wins??0}/${s.filled} 笔 · 保本 ${pc(s.breakeven)}`;
+  $('k_win').textContent=pc(s.win_rate);$('k_win2').textContent=`${s.wins??0}/${s.filled} 笔 · 保本 ${pc(s.breakeven)} · 目标 70%`;
+  $('buckets').innerHTML=(s.buckets||[]).map(b=>{const d=b.win_rate-b.breakeven;
+    return `<tr><td>${b.lo.toFixed(2)}–${b.hi.toFixed(2)}</td><td>${b.n}</td><td>${pc(b.win_rate)}</td><td>${pc(b.breakeven)}</td><td class="${cls(d)}">${d>=0?'+':''}${(d*100).toFixed(1)}%</td><td class="${cls(b.pnl)}">${sgnUsd(b.pnl)}</td></tr>`}).join('')
+    ||'<tr><td colspan=6 class="mut">还没有成交并结算的单</td></tr>';
   if(s.win_rate!=null&&s.breakeven!=null)$('k_win').className=s.win_rate>=s.breakeven?'ok':'bad';else $('k_win').className='';
   $('k_fill').textContent=pc(s.fill_rate);$('k_fill2').textContent=`${s.filled}/${s.settled} 已结算`;
   $('k_rest').textContent=s.resting;$('k_rest2').textContent='均价 '+(s.avg_price==null?'-':s.avg_price.toFixed(3));
@@ -341,7 +348,7 @@ function render(st){
   $('ordsum').textContent=`最近 ${ro.length} 笔 · 挂单 ${s.resting}`;
   $('orders').innerHTML=ro.map(o=>{const [lab,c]=STATUS[o.status]||[o.status,'off'];
     const res=o.settled?(o.filled>0?(o.won?'<span class="ok">赢</span>':'<span class="bad">输</span>'):'<span class="mut">未成交</span>'):'<span class="mut">-</span>';
-    return `<tr><td>${hms(o.placed_ts)}</td><td class="${o.side==='Up'?'ok':'bad'}">${o.side}</td><td>${f2(o.price)}</td><td>${f2(o.shares,0)}</td><td>${f2(o.filled,0)}</td><td><span class="tag ${c}" title="${esc(o.reason||'')}">${lab}</span></td><td>${o.tau==null?'-':f2(o.tau,0)+'s'}</td><td>${o.model_p==null?'-':pc(o.model_p)}</td><td>${res}</td><td class="${cls(o.pnl)}">${o.pnl==null?'-':sgnUsd(o.pnl)}</td></tr>`}).join('')
+    return `<tr><td>${hms(o.placed_ts)}</td><td class="${o.side==='Up'?'ok':'bad'}">${o.side}</td><td>${f2(o.price)}</td><td>${f2(o.shares,0)}</td><td>${f2(o.filled,0)}</td><td><span class="tag ${c}" title="${esc(o.reason||'')}">${lab}${o.reason&&c==='off'?' · '+esc(REASON[o.reason]||o.reason):''}</span></td><td>${o.tau==null?'-':f2(o.tau,0)+'s'}</td><td>${o.model_p==null?'-':pc(o.model_p)}</td><td>${res}</td><td class="${cls(o.pnl)}">${o.pnl==null?'-':sgnUsd(o.pnl)}</td></tr>`}).join('')
     ||'<tr><td colspan=10 class="mut">还没有订单。打开顶部开关开始策略。</td></tr>';
   $('stats').innerHTML=[['信号数',s.signals],['已结算',s.settled],['成交笔数',s.filled],['挂单成交率',pc(s.fill_rate)],['成交后胜率',pc(s.win_rate)],['平均成交价',s.avg_price==null?'-':s.avg_price.toFixed(3)],
     ['保本胜率',pc(s.breakeven)],['未成交单翻转率',pc(s.unfilled_flip_rate)],['累计盈亏',sgnUsd(s.pnl)],['模拟资金',usd(s.bankroll)],['当前敞口',usd(s.exposure)],['挂单中',s.resting]]
@@ -370,7 +377,7 @@ function render(st){
 
   // config summary
   const c=st.strategy.cfg;
-  $('cfgsum').textContent=`每单 $${c.unit_usd} · 价 ${c.min_price}–${c.max_price} · 剩余 ${c.min_remaining}–${c.max_remaining}s · ${c.sides}`;
+  $('cfgsum').textContent=`每单 $${c.unit_usd} · 价 ${c.min_price}–${c.max_price} · 剩余 ${c.min_remaining}–${c.max_remaining}s · 领先≥$${c.min_gap_usd}`;
 }
 async function pollState(){try{render(await api('/api/state'))}catch(e){$('alerts').innerHTML=`<div class="bad">状态获取失败：${esc(e.message)}</div>`}setTimeout(pollState,1000)}
 async function pollSeries(){try{lastSeries=await api('/api/series');renderCharts()}catch(e){}setTimeout(pollSeries,2000)}

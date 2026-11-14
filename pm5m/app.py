@@ -18,7 +18,7 @@ from aiohttp import web
 from . import parsers
 from .feeds import Api, Feeds, ApiError
 from .hub import Hub
-from .paper import PaperEngine, StrategyConfig
+from .paper import STRATEGY_VERSION, PaperEngine, StrategyConfig
 from .runner import Runner, WINDOW
 from .sysmon import SysMon
 from .store import DataStore, _atomic_write, orders_to_csv
@@ -48,7 +48,12 @@ class App:
         self.store = DataStore(data_dir, os.environ.get("PM5M_SECRET_PASSPHRASE") or None)
         self.settings = self.store.load_settings()
         self.hub = Hub()
-        cfg = StrategyConfig.from_dict(self.settings.get("strategy", {}))
+        saved = self.settings.get("strategy", {})
+        if self.settings.get("strategy_v") != STRATEGY_VERSION:
+            # older defaults bought 2-10c lottery tickets; keep only account-level choices
+            saved = {k: saved[k] for k in ("unit_usd", "start_bankroll", "max_exposure", "queue_model", "latency_ms")
+                     if k in saved}
+        cfg = StrategyConfig.from_dict(saved)
         cfg.enabled = False                      # never auto-start trading logic after a restart
         self.dirty = False
         self.engine = PaperEngine(cfg, on_change=self._mark_dirty, on_event=self._event)
@@ -128,6 +133,7 @@ class App:
 
     def save_settings(self) -> None:
         self.settings["strategy"] = self.engine.cfg.to_dict()
+        self.settings["strategy_v"] = STRATEGY_VERSION
         self.store.save_settings(self.settings)
 
     # ---------------- background tasks ----------------

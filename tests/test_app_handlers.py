@@ -123,7 +123,7 @@ class TestHandlers(unittest.TestCase):
         se = body(run(a.h_series(Req(method="GET"))))
         self.assertEqual(len(se["t"]), 1)
         # settings
-        r = body(run(a.h_settings_post(Req({"strategy": {"unit_usd": 7, "max_price": 0.12}, "binance_enabled": False}))))
+        r = body(run(a.h_settings_post(Req({"strategy": {"unit_usd": 7, "min_price": 0.02, "max_price": 0.12}, "binance_enabled": False}))))
         self.assertEqual((r["strategy"]["unit_usd"], r["strategy"]["max_price"]), (7.0, 0.12))
         self.assertFalse(a.settings["binance_enabled"])
         self.assertTrue(os.path.exists(a.store.settings_path))
@@ -135,6 +135,8 @@ class TestHandlers(unittest.TestCase):
         # create an order then export / reset
         a.engine.cfg.enabled, a.engine.cfg.discount, a.engine.cfg.margin = True, 1.0, 0.0
         a.engine.cfg.min_remaining, a.engine.cfg.max_remaining = 0, 400
+        a.engine.cfg.min_price, a.engine.cfg.max_price, a.engine.cfg.loss_mult = 0.02, 0.10, 1.0
+        a.engine.cfg.min_gap_usd = a.engine.cfg.max_sigma5m = a.engine.cfg.max_disagree = a.engine.cfg.fast_move_usd = 0.0
         a.runner.tick(now + 0.3)
         self.assertTrue(a.engine.orders, a.runner.strategy_msg)
         a.flush()

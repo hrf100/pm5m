@@ -222,9 +222,13 @@ def mkctx(slug="s", tau=60.0, p_up=0.9, ub=None, db=None):
             "binance": None, "basis": None}
 
 
+CHEAP_SIDE = dict(min_price=0.02, max_price=0.10, max_remaining=420.0, discount=0.85, loss_mult=1.0,
+                  min_gap_usd=0.0, max_sigma5m=0.0, max_disagree=0.0, fast_move_usd=0.0)
+
+
 class TestPaper(unittest.TestCase):
     def eng(self, **kw):
-        cfg = StrategyConfig(enabled=True, **kw)
+        cfg = StrategyConfig(enabled=True, **dict(CHEAP_SIDE, **kw))
         return PaperEngine(cfg)
 
     def test_place_and_fill_queue(self):
@@ -317,8 +321,36 @@ class TestPaper(unittest.TestCase):
         self.assertEqual((e2.orders, e2.next_id), ([], 1))
         self.assertIn("id", orders_to_csv(rows).splitlines()[0])
 
+    def test_favourite_defaults_and_filters(self):
+        fav = lambda **kw: PaperEngine(StrategyConfig(enabled=True, **kw))
+        ub = mkbook(0.85, 100, 0.86)
+        ctx = lambda **kw: {**mkctx(p_up=0.97, ub=ub), "gap": 30.0, "bn_move": 0.0, **kw}
+        e = fav()
+        self.assertIn("已挂单 Up @0.85", e.evaluate(ctx(), 1000.0))   # p_adj = 1-0.03*1.5 = .955 >= .87
+        self.assertIn("领先", fav().evaluate(ctx(gap=10.0), 1000.0))
+        self.assertIn("急动", fav().evaluate(ctx(bn_move=-30.0), 1000.0))
+        self.assertIn("波动过大", fav().evaluate(dict(ctx(), sigma_rel=0.01), 1000.0))
+        self.assertIn("乐观太多", fav().evaluate(dict(ctx(), p_up=0.999, books={"Up": mkbook(0.75, 100, 0.76),
+                                                                             "Down": mkbook(0.2, 10, 0.25)}), 1000.0))
+        self.assertIn("优势不足", fav().evaluate(dict(ctx(), p_up=0.9), 1000.0))  # .85 < .87
+        e.manage(ctx(bn_move=-40.0), 1001.0)
+        self.assertEqual(e.orders[0].cancel_reason, "fast_move")
+
+    def test_buckets(self):
+        e = PaperEngine(StrategyConfig(enabled=True))
+        ub = mkbook(0.85, 1, 0.86)
+        ctx = lambda slug: dict(mkctx(slug=slug, p_up=0.97, ub=ub), gap=30.0, bn_move=0.0)
+        for i, up in enumerate((True, True, False)):
+            e.evaluate(ctx(f"w{i}"), 1000.0 + i * 300)
+            e.on_trade("U", 0.84, 1000, 1001.0 + i * 300)
+            e.settle(f"w{i}", up_won=up, final_value=None)
+        b = e.stats()["buckets"]
+        self.assertEqual(len(b), 1)
+        self.assertEqual((b[0]["lo"], b[0]["n"], b[0]["wins"]), (0.85, 3, 2))
+        self.assertAlmostEqual(b[0]["avg_price"], 0.85)
+
     def test_config_clamps(self):
-        c = StrategyConfig.from_dict({"unit_usd": "5", "max_price": "0.1", "enabled": "true", "queue_model": "bogus", "junk": 1})
+        c = StrategyConfig.from_dict({"unit_usd": "5", "min_price": "0.02", "max_price": "0.1", "enabled": "true", "queue_model": "bogus", "junk": 1})
         self.assertEqual((c.unit_usd, c.max_price, c.enabled, c.queue_model), (5.0, 0.1, True, "conservative"))
 
 
@@ -328,8 +360,8 @@ class TestRunnerEndToEnd(unittest.TestCase):
         try:
             store = DataStore(d)
             hub = Hub()
-            eng = PaperEngine(StrategyConfig(enabled=True, discount=1.0, margin=0.01, min_remaining=10, max_remaining=120,
-                                             sigma5m=0.0015, use_realized_vol=False))
+            eng = PaperEngine(StrategyConfig(enabled=True, **dict(CHEAP_SIDE, discount=1.0, margin=0.01, min_remaining=10,
+                                                                  max_remaining=120, sigma5m=0.0015, use_realized_vol=False)))
             run = Runner(hub, eng, store)
             S = 1_800_000_000 - (1_800_000_000 % 300)      # a window start
             T = S + 300
