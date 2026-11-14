@@ -223,7 +223,7 @@ function renderSys(d){
   const pct=v=>v==null?'-':Math.round(v)+'%';
   const rate=v=>v==null?'-':(v/1024).toFixed(1)+' KB/s';
   const mem=d.mem||{}, nic=d.nic||{};
-  $('sy_cpu').textContent=pct(n('cpu_sys'));
+  $('sy_cpu').textContent=pct(n('cpu_sys'))+(d.ncpu?(' · '+d.ncpu+'核'):'');
   $('sy_cpu2').textContent=n('cpu_proc')==null?'':('进程 '+n('cpu_proc').toFixed(2)+'%');
   $('sy_mem').textContent=bytesStr(mem.used_bytes)+' / '+bytesStr(mem.total_bytes);
   $('sy_mem2').textContent=pct(n('mem_sys'));
