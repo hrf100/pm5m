@@ -1,0 +1,8 @@
+.venv/
+venv/
+data/
+__pycache__/
+*.py[cod]
+.env
+pm5m_selftest_report.txt
+research_report.md

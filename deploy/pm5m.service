@@ -1,0 +1,31 @@
+[Unit]
+Description=Polymarket 5m paper-trading module
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pm5m
+Group=pm5m
+WorkingDirectory=/opt/pm5m
+# Defaults. /etc/pm5m.env overrides the same keys. The leading "-" keeps the
+# unit startable before that file exists; deploy/install.sh always creates it.
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PM5M_DATA=/var/lib/pm5m
+Environment=PM5M_HOST=127.0.0.1
+Environment=PM5M_PORT=8080
+EnvironmentFile=-/etc/pm5m.env
+ExecStart=/opt/pm5m/.venv/bin/python -m pm5m
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+UMask=0077
+# ProtectSystem=strict is read-only everywhere except StateDirectory.
+StateDirectory=pm5m
+StateDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target

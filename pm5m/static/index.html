@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PM 5m 纸面测试</title>
+<style>
+:root{--bg:#0f1318;--card:#171d25;--line:#2a3340;--tx:#d8dee6;--mut:#8593a3;--up:#3ecf8e;--dn:#f0616d;--ac:#5aa9ff;--warn:#f5b84b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:13px/1.45 -apple-system,Segoe UI,Roboto,Arial,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line)}
+h1{font-size:16px;margin:0 10px 0 0}.badge{padding:2px 8px;border-radius:10px;background:#244;color:#7fd;font-size:12px}
+.chip{padding:2px 8px;border-radius:10px;font-size:12px;border:1px solid var(--line)}.ok{color:var(--up)}.bad{color:var(--dn)}.warn{color:var(--warn)}.mut{color:var(--mut)}
+main{display:grid;grid-template-columns:repeat(12,1fr);gap:12px;padding:12px 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px;min-width:0}
+.c4{grid-column:span 4}.c5{grid-column:span 5}.c6{grid-column:span 6}.c7{grid-column:span 7}.c8{grid-column:span 8}.c12{grid-column:span 12}
+@media(max-width:1000px){.c4,.c5,.c6,.c7,.c8{grid-column:span 12}}
+h2{font-size:13px;margin:0 0 8px;color:var(--mut);font-weight:600;letter-spacing:.3px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px}.kv div:nth-child(odd){color:var(--mut)}
+.big{font-size:30px;font-weight:700;font-variant-numeric:tabular-nums}
+table{border-collapse:collapse;width:100%}th,td{padding:3px 6px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}th{color:var(--mut);font-weight:500}
+td:first-child,th:first-child{text-align:left}.scroll{overflow:auto;max-height:260px}
+canvas{width:100%;height:230px;display:block}
+label{display:flex;justify-content:space-between;gap:8px;align-items:center;margin:3px 0}
+input,select{background:#0c1015;color:var(--tx);border:1px solid var(--line);border-radius:4px;padding:3px 6px;width:130px}
+input[type=checkbox]{width:auto}input.wide{width:100%}
+button{background:#22406a;color:#fff;border:1px solid #2f5a96;border-radius:5px;padding:5px 10px;cursor:pointer}button:hover{background:#2a4f85}
+button.red{background:#6a2230;border-color:#96303f}button.grn{background:#1f5a3f;border-color:#2c8059}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:4px 16px}
+.legend span{margin-right:12px}.note{font-size:12px;color:var(--mut)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Polymarket BTC 5 分钟 · 纸面测试</h1><span class="badge">PAPER · 不发送真实订单</span>
+  <span id="feeds"></span><span id="geo" class="chip"></span><span id="clock" class="mut"></span>
+</header>
+<main>
+  <section class="card c4">
+    <h2>当前盘口</h2>
+    <div class="row"><span class="mut" id="slug"></span></div>
+    <div class="big" id="cd">--:--</div>
+    <div class="kv" style="margin-top:8px">
+      <div>价格基准 B</div><div id="B">-</div>
+      <div>Chainlink 现货</div><div id="spot">-</div>
+      <div>TWAP60 (Chainlink)</div><div id="twap">-</div>
+      <div>现货 − B</div><div id="gap">-</div>
+      <div>Binance（参考）</div><div id="bn">-</div>
+      <div>5分钟波动 σ（实时）</div><div id="sig">-</div>
+      <div>模型 P(Up) / P(Down)</div><div id="pm">-</div>
+      <div>上一窗口结算</div><div id="lastfinal">-</div>
+    </div>
+    <table style="margin-top:10px"><thead><tr><th>方向</th><th>买一</th><th>买一量</th><th>卖一</th><th>卖一量</th></tr></thead><tbody id="books"></tbody></table>
+    <div class="note" style="margin-top:8px">策略状态：<span id="smsg"></span></div>
+  </section>
+  <section class="card c8">
+    <h2>Polymarket 涨/跌 买一价（当前窗口）　<label style="display:inline"><input type="checkbox" id="full"> 纵轴 0–1</label></h2>
+    <canvas id="ch1"></canvas>
+    <div class="legend note"><span style="color:var(--up)">━ Up 买一</span><span style="color:var(--up)">┅ Up 卖一</span><span style="color:var(--dn)">━ Down 买一</span><span style="color:var(--dn)">┅ Down 卖一</span><span>▲ 挂单　● 成交</span></div>
+    <h2 style="margin-top:10px">价格 − B（美元）　现货 / TWAP60 / Binance(基差校正)</h2>
+    <canvas id="ch2"></canvas>
+    <div class="legend note"><span style="color:#5aa9ff">━ 现货</span><span style="color:#f5b84b">━ TWAP60</span><span style="color:#9aa">━ Binance</span><span>竖线 = 最后60秒（决定结算价的区间）</span></div>
+  </section>
+
+  <section class="card c5">
+    <h2>策略参数（挂 Maker 买单，每单约 $<span id="unitlbl">5</span>）</h2>
+    <div class="row"><button class="grn" onclick="strat('start')">开始</button><button class="red" onclick="strat('stop')">停止并撤单</button><span id="enabled"></span></div>
+    <div id="cfg" class="grid2"></div>
+    <div class="row"><button onclick="saveCfg()">保存参数</button><span class="note" id="cfgmsg"></span></div>
+    <div class="note">思路：窗口后段，某一侧买一价落在区间内且「模型概率×折扣 ≥ 价格+边际」时，在买一挂单排队；只有真实成交才会成交。</div>
+  </section>
+  <section class="card c7">
+    <h2>模拟成绩</h2>
+    <div class="grid2" id="stats"></div>
+    <div class="row"><a href="/api/export/orders.csv"><button>导出 CSV</button></a>
+      <button class="red" onclick="resetRec()">重置记录…</button>
+      <label style="display:inline"><input type="checkbox" id="arch" checked> 重置前归档</label>
+      <label style="display:inline"><input type="checkbox" id="rser"> 同时清除窗口序列数据</label></div>
+    <h2 style="margin-top:8px">订单（最近 40 笔）</h2>
+    <div class="scroll"><table><thead><tr><th>#</th><th>窗口</th><th>方向</th><th>价</th><th>股数</th><th>成交</th><th>状态</th><th>τ(s)</th><th>排队量</th><th>模型p</th><th>结果</th><th>盈亏$</th></tr></thead><tbody id="orders"></tbody></table></div>
+  </section>
+
+  <section class="card c6">
+    <h2>钱包与 API</h2>
+    <div class="kv" id="wallet"></div>
+    <hr style="border-color:var(--line)">
+    <div class="grid2">
+      <label>签名类型<select id="w_sig"><option value="0">0 EOA</option><option value="1">1 POLY_PROXY</option><option value="2" selected>2 GNOSIS_SAFE</option><option value="3">3 DEPOSIT_WALLET</option></select></label>
+      <label>资金地址 funder<input id="w_funder" class="wide" placeholder="0x… Polymarket 个人资料里的地址"></label>
+    </div>
+    <div id="pkrow"><label>私钥（仅用于一次性推导 API 凭据）<input id="w_pk" type="password" class="wide" autocomplete="off" placeholder="0x…（不会回显，不会写日志）"></label>
+    <label><span>推导后保存私钥到服务器（默认不保存）</span><input type="checkbox" id="w_store"></label>
+    <div class="row"><button onclick="saveWallet()">推导 API 凭据并保存</button></div></div>
+    <div class="row"><button onclick="refreshWallet()">刷新余额</button><button class="red" onclick="delWallet()">清除钱包数据</button><span id="wmsg" class="note"></span></div>
+    <details><summary class="note">不想粘贴私钥？手动填写已有 API 凭据</summary>
+      <label>签名钱包地址<input id="m_signer" class="wide"></label><label>apiKey<input id="m_key" class="wide"></label>
+      <label>secret<input id="m_secret" type="password" class="wide"></label><label>passphrase<input id="m_pass" type="password" class="wide"></label>
+      <div class="row"><button onclick="saveManual()">保存凭据</button></div></details>
+    <div class="note">说明：API 凭据只能用于鉴权，下单仍需私钥签名；本版本只做纸面测试，不下单。建议用专用小额钱包。</div>
+  </section>
+  <section class="card c6">
+    <h2>持仓</h2>
+    <div class="scroll"><table><thead><tr><th>市场</th><th>方向</th><th>数量</th><th>均价</th><th>现价</th><th>价值</th><th>盈亏</th></tr></thead><tbody id="pos"></tbody></table></div>
+    <h2 style="margin-top:10px">诊断</h2>
+    <div class="row"><button onclick="selftest()">运行连接自检</button></div>
+    <div id="selftest" class="note"></div>
+    <div id="errs" class="note bad"></div>
+  </section>
+
+  <section class="card c12">
+    <h2>资源占用（最近 1 小时，每 2 秒采样）　<span class="note" id="sysnote"></span></h2>
+    <div class="grid2" style="grid-template-columns:1fr 1fr 1fr">
+      <div><div class="note">CPU（系统 % / 本进程 % 占整机）</div><canvas id="sc1" style="height:170px"></canvas></div>
+      <div><div class="note">内存（系统已用 %）</div><canvas id="sc2" style="height:170px"></canvas></div>
+      <div><div class="note">流量（KB/s）：网卡收/发、应用行情、网页输出</div><canvas id="sc3" style="height:170px"></canvas></div>
+    </div>
+    <div class="legend note"><span style="color:#5aa9ff">━ 系统CPU</span><span style="color:#f5b84b">━ 本进程CPU</span><span style="color:#3ecf8e">━ 内存</span><span style="color:#5aa9ff">━ 网卡收</span><span style="color:#f5b84b">━ 网卡发</span><span style="color:#9aa">━ 行情接收</span><span style="color:#c792ea">━ 网页输出</span></div>
+    <table style="margin-top:8px"><thead><tr><th>指标</th><th>当前</th><th>1小时均值</th><th>1小时峰值</th></tr></thead><tbody id="sysstats"></tbody></table>
+    <div class="kv" style="margin-top:8px" id="systot"></div>
+  </section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const f2=(x,n=2)=>x==null?'-':Number(x).toFixed(n);
+const usd=x=>x==null?'-':'$'+Number(x).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+async function api(path,method='GET',body){
+  const r=await fetch(path,{method,headers:{'Content-Type':'application/json','X-Requested-With':'pm5m'},body:body?JSON.stringify(body):undefined});
+  let j=null;try{j=await r.json()}catch(e){}
+  if(!r.ok)throw new Error((j&&j.error)||('HTTP '+r.status));return j}
+
+const CFG=[['unit_usd','每单金额 $'],['min_price','价格下限'],['max_price','价格上限'],['min_remaining','最少剩余秒'],['max_remaining','最多剩余秒'],
+['margin','边际 (p−价)'],['discount','逆向选择折扣'],['ttl_s','挂单存活 s'],['cancel_below_remaining','剩余<此值撤单'],['max_orders_per_window','每窗口最多单数'],
+['sides','方向',['both','up','down']],['sigma5m','5分钟σ默认值(小数)'],['vol_mult','波动放大倍数'],['use_realized_vol','用实时波动',true],
+['queue_model','排队模型',['conservative','optimistic']],['latency_ms','延迟 ms'],['start_bankroll','起始资金 $'],['max_exposure','最大敞口 $']];
+let cfgLoaded=false;
+function buildCfg(c){
+  const h=CFG.map(([k,l,o])=>{
+    if(o===true)return `<label>${l}<input type="checkbox" id="c_${k}" ${c[k]?'checked':''}></label>`;
+    if(Array.isArray(o))return `<label>${l}<select id="c_${k}">${o.map(v=>`<option ${c[k]===v?'selected':''}>${v}</option>`).join('')}</select></label>`;
+    return `<label>${l}<input id="c_${k}" value="${esc(c[k])}"></label>`}).join('');
+  $('cfg').innerHTML=h+`<label>启用 Binance 参考<input type="checkbox" id="c_binance" ${window._bn?'checked':''}></label><label>记录窗口序列<input type="checkbox" id="c_rec" ${window._rec?'checked':''}></label>`;
+  cfgLoaded=true}
+async function saveCfg(){
+  const s={};CFG.forEach(([k,l,o])=>{const e=$('c_'+k);s[k]=o===true?e.checked:e.value});
+  try{await api('/api/settings','POST',{strategy:s,binance_enabled:$('c_binance').checked,record_series:$('c_rec').checked});$('cfgmsg').textContent='已保存';}catch(e){$('cfgmsg').textContent='失败: '+e.message}}
+async function strat(a){try{await api('/api/strategy/'+a,'POST',{})}catch(e){alert(e.message)}}
+async function resetRec(){
+  if(!confirm('确定重置所有纸面交易记录？'+($('arch').checked?'（旧记录会先归档到 data/archive）':'（不归档，将永久删除）')))return;
+  try{const r=await api('/api/reset','POST',{confirm:true,archive:$('arch').checked,include_series:$('rser').checked});alert('已重置'+(r.archived_to?'，归档到 '+r.archived_to:''))}catch(e){alert(e.message)}}
+async function saveWallet(){
+  $('wmsg').textContent='处理中…';
+  try{const r=await api('/api/wallet','POST',{private_key:$('w_pk').value,funder:$('w_funder').value,signature_type:+$('w_sig').value,store_key:$('w_store').checked});
+    $('w_pk').value='';$('wmsg').textContent='成功：signer '+r.signer}catch(e){$('wmsg').textContent='失败: '+e.message}}
+async function saveManual(){
+  try{await api('/api/wallet','POST',{signer_address:$('m_signer').value,api_key:$('m_key').value,api_secret:$('m_secret').value,api_passphrase:$('m_pass').value,funder:$('w_funder').value,signature_type:+$('w_sig').value});
+    $('m_secret').value='';$('m_pass').value='';$('wmsg').textContent='已保存'}catch(e){$('wmsg').textContent='失败: '+e.message}}
+async function delWallet(){if(confirm('清除服务器上保存的 API 凭据（和私钥，如有）？')){await api('/api/wallet','DELETE');}}
+async function refreshWallet(){try{await api('/api/wallet/refresh','POST',{})}catch(e){$('wmsg').textContent=e.message}}
+async function selftest(){
+  $('selftest').textContent='检测中…';
+  try{const r=await api('/api/selftest','POST',{});
+    $('selftest').innerHTML=r.map(x=>`<div class="${x.ok?'ok':'bad'}">${x.ok?'✓':'✗'} ${esc(x.name)} — ${esc(x.detail)} ${x.ms?`(${x.ms}ms)`:''}</div>`).join('')}catch(e){$('selftest').textContent=e.message}}
+
+function drawChart(cv,o){
+  const dpr=window.devicePixelRatio||1,W=cv.clientWidth,H=cv.clientHeight;cv.width=W*dpr;cv.height=H*dpr;
+  const g=cv.getContext('2d');g.scale(dpr,dpr);g.clearRect(0,0,W,H);
+  const L=48,R=8,T=8,Bm=20,pw=W-L-R,ph=H-T-Bm;
+  let ys=[];o.series.forEach(s=>s.pts.forEach(p=>{if(p[1]!=null)ys.push(p[1])}));
+  (o.hlines||[]).forEach(h=>ys.push(h.y));
+  let y0=o.ymin??(ys.length?Math.min(...ys):0),y1=o.ymax??(ys.length?Math.max(...ys):1);
+  if(o.ymin==null){const pad=(y1-y0)*0.1||0.01;y0-=pad;y1+=pad}
+  const X=x=>L+(x-o.xmin)/(o.xmax-o.xmin)*pw,Y=y=>T+(1-(y-y0)/(y1-y0))*ph;
+  g.strokeStyle='#2a3340';g.fillStyle='#8593a3';g.font='11px sans-serif';g.lineWidth=1;
+  for(let i=0;i<=4;i++){const y=y0+(y1-y0)*i/4;g.beginPath();g.moveTo(L,Y(y));g.lineTo(W-R,Y(y));g.stroke();g.fillText((o.yfmt||(v=>v.toFixed(2)))(y),2,Y(y)+4)}
+  for(let x=o.xmin;x<=o.xmax;x+=60){g.fillText(x+'s',X(x)-8,H-5)}
+  (o.vlines||[]).forEach(v=>{g.strokeStyle='#556';g.setLineDash([4,3]);g.beginPath();g.moveTo(X(v.x),T);g.lineTo(X(v.x),T+ph);g.stroke();g.setLineDash([])});
+  (o.hlines||[]).forEach(h=>{g.strokeStyle=h.color||'#667';g.setLineDash([2,3]);g.beginPath();g.moveTo(L,Y(h.y));g.lineTo(W-R,Y(h.y));g.stroke();g.setLineDash([])});
+  o.series.forEach(s=>{g.strokeStyle=s.color;g.lineWidth=1.6;g.setLineDash(s.dash||[]);g.beginPath();let st=false;
+    s.pts.forEach(p=>{if(p[1]==null){st=false;return}const x=X(p[0]),y=Y(p[1]);if(!st){g.moveTo(x,y);st=true}else g.lineTo(x,y)});g.stroke();g.setLineDash([])});
+  (o.markers||[]).forEach(m=>{g.fillStyle=m.color;const x=X(m.x),y=Y(m.y);g.beginPath();
+    if(m.shape==='tri'){g.moveTo(x,y-6);g.lineTo(x-5,y+4);g.lineTo(x+5,y+4)}else g.arc(x,y,4,0,7);g.fill()});
+}
+let lastSeries=null;
+function renderCharts(){
+  const s=lastSeries;if(!s||!s.t||!s.t.length){drawChart($('ch1'),{series:[],xmin:0,xmax:300});drawChart($('ch2'),{series:[],xmin:0,xmax:300});return}
+  const mk=a=>s.t.map((t,i)=>[t,a[i]]);
+  const full=$('full').checked;
+  const mkr=[];(s.orders||[]).forEach(o=>{mkr.push({x:o.t,y:o.price,color:o.side==='Up'?'#3ecf8e':'#f0616d',shape:'tri'});if(o.fill_t!=null)mkr.push({x:o.fill_t,y:o.price,color:'#fff',shape:'dot'})});
+  drawChart($('ch1'),{xmin:0,xmax:300,ymin:full?0:undefined,ymax:full?1:undefined,markers:mkr,vlines:[{x:240}],
+    series:[{color:'#3ecf8e',pts:mk(s.up_bid)},{color:'#3ecf8e',dash:[4,3],pts:mk(s.up_ask)},{color:'#f0616d',pts:mk(s.dn_bid)},{color:'#f0616d',dash:[4,3],pts:mk(s.dn_ask)}]});
+  const ref=s.B??(s.spot.find(v=>v!=null)??0);const rel=a=>mk(a).map(p=>[p[0],p[1]==null?null:p[1]-ref]);
+  drawChart($('ch2'),{xmin:0,xmax:300,yfmt:v=>v.toFixed(0),hlines:[{y:0,color:'#8a8'}],vlines:[{x:240}],
+    series:[{color:'#5aa9ff',pts:rel(s.spot)},{color:'#f5b84b',pts:rel(s.twap)},{color:'#9aa',pts:rel(s.binance_adj)}]});
+}
+function chips(feeds){return Object.values(feeds).map(f=>{const c=f.state==='connected'&&f.age_s!=null&&f.age_s<20?'ok':(f.state==='disabled'?'mut':'bad');
+  return `<span class="chip ${c}" title="${esc(f.error||f.extra)}">${esc(f.name)}: ${esc(f.state)}${f.age_s!=null?' '+f.age_s+'s':''}</span>`}).join(' ')}
+function render(st){
+  window._bn=st.binance_enabled;window._rec=st.record_series;
+  $('pkrow').style.display=st.allow_web_key?'':'none';
+  if(!cfgLoaded)buildCfg(st.strategy.cfg);
+  $('feeds').innerHTML=chips(st.feeds);
+  const g=st.geo||{};$('geo').className='chip '+(g.blocked?'bad':(g.error?'warn':'ok'));$('geo').textContent=g.blocked?`地域受限 ${g.country||''}`:(g.error?'geo 未知':`地域 ${g.country||''} 可用`);
+  $('clock').textContent=new Date(st.now*1000).toISOString().slice(11,19)+' UTC';
+  const w=st.window;const rem=Math.max(0,w.remaining);$('cd').textContent=String(Math.floor(rem/60)).padStart(2,'0')+':'+String(Math.floor(rem%60)).padStart(2,'0');
+  $('slug').textContent=w.slug+(w.market_ok?'':'（市场信息获取中）');
+  $('B').textContent=w.B==null?'等待（启动后首个窗口无法获得）':usd(w.B)+'  ['+w.B_source+']';
+  const p=st.prices;$('spot').innerHTML=usd(p.spot)+` <span class="mut">${p.spot_source||''} ${p.spot_age!=null?p.spot_age+'s前':''}</span>`;
+  $('twap').textContent=usd(p.twap60);$('gap').textContent=(p.spot!=null&&w.B!=null)?(p.spot-w.B>=0?'+':'')+f2(p.spot-w.B):'-';
+  $('bn').textContent=p.binance==null?'-':usd(p.binance)+(p.basis!=null?`（基差 ${p.basis>=0?'+':''}${f2(p.basis)}）`:'');
+  const m=st.model;$('sig').textContent=m&&m.sigma5m_eff?(m.sigma5m_eff*100).toFixed(3)+'%':'-';
+  $('pm').textContent=m?(m.p_up*100).toFixed(1)+'% / '+(m.p_down*100).toFixed(1)+'%':'-';
+  const lf=st.last_final;$('lastfinal').textContent=lf?`${lf.up?'Up':'Down'}（终值 ${usd(lf.value)} vs B ${usd(lf.B)}）`:'-';
+  $('books').innerHTML=['Up','Down'].map(s=>{const b=st.books[s];return b?`<tr><td style="color:var(--${s==='Up'?'up':'dn'})">${s}</td><td>${f2(b.bid)}</td><td>${f2(b.bid_size,0)}</td><td>${f2(b.ask)}</td><td>${f2(b.ask_size,0)}</td></tr>`:`<tr><td>${s}</td><td colspan=4 class="mut">无数据</td></tr>`}).join('');
+  $('smsg').textContent=st.strategy.msg;$('enabled').innerHTML=st.strategy.enabled?'<span class="ok">● 运行中</span>':'<span class="mut">○ 已停止</span>';$('unitlbl').textContent=st.strategy.cfg.unit_usd;
+  const s=st.stats,pc=x=>x==null?'-':(x*100).toFixed(1)+'%';
+  $('stats').innerHTML=[['信号数',s.signals],['已结算',s.settled],['成交笔数',s.filled],['挂单成交率',pc(s.fill_rate)],['成交后翻转率',pc(s.win_rate)],['平均成交价',s.avg_price==null?'-':s.avg_price.toFixed(3)],
+    ['盈亏平衡概率',s.breakeven==null?'-':pc(s.breakeven)],['未成交单的翻转率',pc(s.unfilled_flip_rate)],['累计盈亏',usd(s.pnl)],['模拟资金',usd(s.bankroll)],['当前敞口',usd(s.exposure)],['挂单中',s.resting]]
+    .map(([k,v])=>`<div class="mut">${k}</div><div style="text-align:right">${v}</div>`).join('');
+  $('orders').innerHTML=st.recent_orders.map(o=>{const t=o.slug.split('-').pop().slice(-4);
+    return `<tr><td>${o.id}</td><td>${t}</td><td style="color:var(--${o.side==='Up'?'up':'dn'})">${o.side}</td><td>${f2(o.price)}</td><td>${f2(o.shares,0)}</td><td>${f2(o.filled,0)}</td><td>${esc(o.status)}${o.reason?'/'+esc(o.reason):''}</td><td>${f2(o.tau,0)}</td><td>${f2(o.queue,0)}</td><td>${f2(o.model_p,3)}</td><td>${o.settled?(o.won?'翻转✓':'未翻转'):'-'}</td><td class="${o.pnl>0?'ok':(o.pnl<0?'bad':'')}">${o.pnl==null?'-':f2(o.pnl)}</td></tr>`}).join('');
+  const wl=st.wallet;
+  $('wallet').innerHTML=[['凭据',wl.has_creds?`<span class="ok">已设置</span> apiKey ${esc(wl.api_key)}`:'<span class="warn">未设置（无法使用 PolyBolt/Chainlink TWAP）</span>'],
+    ['签名地址',esc(wl.signer||'-')],['资金地址',esc(wl.funder||'-')],['私钥',wl.key_stored?'<span class="warn">已保存在服务器'+(wl.secrets_encrypted?'（加密）':'（未加密，权限600）')+'</span>':'未保存'],
+    ['CLOB 可用余额',wl.clob_balance==null?'-':usd(wl.clob_balance)],['链上 pUSD',wl.onchain_pusd==null?'-':usd(wl.onchain_pusd)],['持仓总值',wl.positions_value==null?'-':usd(wl.positions_value)],
+    ['更新',wl.updated?new Date(wl.updated*1000).toISOString().slice(11,19)+' UTC':'-']].map(([k,v])=>`<div>${k}</div><div>${v}</div>`).join('');
+  $('pos').innerHTML=(wl.positions||[]).slice(0,60).map(r=>`<tr><td>${esc(r.title)}</td><td>${esc(r.outcome)}</td><td>${f2(r.size)}</td><td>${f2(r.avg_price,3)}</td><td>${f2(r.cur_price,3)}</td><td>${usd(r.value)}</td><td class="${r.pnl>0?'ok':(r.pnl<0?'bad':'')}">${usd(r.pnl)}</td></tr>`).join('')||'<tr><td colspan=7 class="mut">无持仓或未设置钱包</td></tr>';
+  const errs=[];Object.entries(wl.errors||{}).forEach(([k,v])=>errs.push(k+': '+v));Object.entries(st.errors||{}).forEach(([k,v])=>errs.push(k+': '+v));if(st.last_error)errs.push(st.last_error);
+  $('errs').innerHTML=errs.map(esc).join('<br>');
+}
+async function pollState(){try{render(await api('/api/state'))}catch(e){$('errs').textContent='状态获取失败: '+e.message}setTimeout(pollState,1000)}
+async function pollSeries(){try{lastSeries=await api('/api/series');renderCharts()}catch(e){}setTimeout(pollSeries,2000)}
+$('full').onchange=renderCharts;window.onresize=renderCharts;pollState();pollSeries();
+
+const KB=v=>v==null?'-':(v/1024).toFixed(1)+' KB/s';
+function sline(name,key,fmt){const x=window._sys?.stats?.[key]||{};return `<tr><td>${name}</td><td>${fmt(x.now)}</td><td>${fmt(x.avg)}</td><td>${fmt(x.max)}</td></tr>`}
+function bytesStr(b){if(b==null)return '-';const u=['B','KB','MB','GB','TB'];let i=0;while(b>=1024&&i<4){b/=1024;i++}return b.toFixed(i?2:0)+' '+u[i]}
+function renderSys(d){
+  window._sys=d;const t=d.series.t;if(!t.length){$('sysnote').textContent='采样中…';return}
+  const now=d.now, xs=t.map(v=>v-now);
+  const mk=k=>d.series[k].map((v,i)=>[xs[i],v]);
+  const common={xmin:-3600,xmax:0,yfmt:v=>v.toFixed(0)};
+  drawChart($('sc1'),{...common,ymin:0,ymax:100,series:[{color:'#5aa9ff',pts:mk('cpu_sys')},{color:'#f5b84b',pts:mk('cpu_proc')}]});
+  drawChart($('sc2'),{...common,ymin:0,ymax:100,series:[{color:'#3ecf8e',pts:mk('mem_sys')}]});
+  const kb=k=>mk(k).map(([x,v])=>[x,v==null?null:v/1024]);
+  drawChart($('sc3'),{...common,ymin:0,series:[{color:'#5aa9ff',pts:kb('rx_bps')},{color:'#f5b84b',pts:kb('tx_bps')},{color:'#9aa',pts:kb('feed_bps')},{color:'#c792ea',pts:kb('http_bps')}]});
+  $('sysnote').textContent=`采样 ${d.window_s}s · ${d.ncpu} 核`;
+  $('sysstats').innerHTML=sline('系统 CPU','cpu_sys',v=>v==null?'-':v.toFixed(1)+' %')+sline('本进程 CPU（占整机）','cpu_proc',v=>v==null?'-':v.toFixed(2)+' %')+
+    sline('本进程占用核数','cores',v=>v==null?'-':v.toFixed(3))+sline('系统内存已用','mem_sys',v=>v==null?'-':v.toFixed(1)+' %')+sline('本进程内存 RSS','rss_mb',v=>v==null?'-':v.toFixed(1)+' MB')+
+    sline('网卡接收（整机）','rx_bps',KB)+sline('网卡发送（整机）','tx_bps',KB)+sline('行情接收（应用）','feed_bps',KB)+sline('网页输出（应用）','http_bps',KB);
+  const T=d.totals_since_start;
+  $('systot').innerHTML=[['网卡接收 累计',bytesStr(T.nic_rx_bytes)],['网卡发送 累计',bytesStr(T.nic_tx_bytes)],['行情接收 累计',bytesStr(T.feed_bytes)],['网页输出 累计',bytesStr(T.http_out_bytes)],
+    ['磁盘剩余',bytesStr(d.disk.free_bytes)],['数据目录大小',bytesStr(d.disk.data_dir_bytes)]].map(([k,v])=>`<div>${k}</div><div>${v}</div>`).join('');
+}
+async function pollSys(){try{renderSys(await api('/api/sys'))}catch(e){$('sysnote').textContent='资源数据获取失败: '+e.message}setTimeout(pollSys,2000)}
+pollSys();
+</script>
+</body>
+</html>

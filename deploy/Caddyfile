@@ -1,0 +1,18 @@
+# Public HTTPS entry. Caddy obtains and renews the certificate automatically.
+# Requirements: a domain (e.g. pm5m.example.com) whose A record points to this server.
+pm5m.example.com {
+    encode gzip
+    reverse_proxy 127.0.0.1:8080 {
+        header_up X-Forwarded-Proto https
+    }
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+        X-Frame-Options DENY
+        -Server
+    }
+    # Deny access to anything but the app's own routes (static page + /api/*)
+    @other not path / /api/*
+    respond @other 404
+}

@@ -1,0 +1,4 @@
+# 需要一个指向服务器的域名；Caddy 会自动申请 HTTPS 证书
+pm5m.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
