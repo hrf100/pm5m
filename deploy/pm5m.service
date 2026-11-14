@@ -12,7 +12,7 @@ WorkingDirectory=/opt/pm5m
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PM5M_DATA=/var/lib/pm5m
-Environment=PM5M_HOST=127.0.0.1
+Environment=PM5M_HOST=0.0.0.0
 Environment=PM5M_PORT=8080
 EnvironmentFile=-/etc/pm5m.env
 ExecStart=/opt/pm5m/.venv/bin/python -m pm5m

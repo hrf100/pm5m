@@ -24,19 +24,11 @@
 sudo bash -c "curl -fsSL https://raw.githubusercontent.com/hrf100/pm5m/main/deploy/install.sh | bash"
 ```
 
-公网 HTTPS 加上域名参数：
-
-```bash
-sudo bash -c "curl -fsSL https://raw.githubusercontent.com/hrf100/pm5m/main/deploy/install.sh | bash -s -- --domain pm.example.com"
-```
-
 脚本从 [hrf100/pm5m](https://github.com/hrf100/pm5m) 的 `main` 拉取代码。已经把目录放在服务器上时，也可以在该目录执行 `sudo bash deploy/install.sh`。
 
-脚本会装 Python 3.9+ 与依赖、创建系统用户 `pm5m`、代码放到 `/opt/pm5m`、数据放到 `/var/lib/pm5m`、生成 `/etc/pm5m.env`（随机网页密码，权限 600）、注册并启动 `pm5m.service`。应用只监听 `127.0.0.1:8080`。重复执行会按 GitHub `main` 升级，不会覆盖已有 `/etc/pm5m.env`。
+脚本会装 Python 3.9+ 与依赖、创建系统用户 `pm5m`、代码放到 `/opt/pm5m`、数据放到 `/var/lib/pm5m`、生成 `/etc/pm5m.env`（随机网页密码，权限 600）、注册并启动 `pm5m.service`。应用监听 `0.0.0.0:8080`，浏览器打开 `http://服务器IP:8080`。重复执行会按 GitHub `main` 升级，不会改已有密码和私钥；若旧配置还写着 `127.0.0.1`，会改成直接监听。
 
-`--domain` 会额外安装 Caddy 并申请证书。域名 A 记录须已指向这台机器。防火墙只放行 22/80/443，不要开放 8080。
-
-装完：用户名 `admin`，密码在安装输出和 `/etc/pm5m.env` 的 `PM5M_PASSWORD`。私钥写入同一文件的 `PM5M_PRIVATE_KEY`、`PM5M_FUNDER` 后执行 `sudo systemctl restart pm5m`。没有域名时：`ssh -L 8080:127.0.0.1:8080 user@server`，浏览器打开 `http://127.0.0.1:8080`。日志：`journalctl -u pm5m -f`。
+装完：用户名 `admin`，密码在安装输出和 `/etc/pm5m.env` 的 `PM5M_PASSWORD`。私钥写入同一文件的 `PM5M_PRIVATE_KEY`、`PM5M_FUNDER` 后执行 `sudo systemctl restart pm5m`。云厂商安全组要放行 TCP 8080。日志：`journalctl -u pm5m -f`。
 
 ### 本地开发
 
@@ -52,8 +44,7 @@ python -m pm5m --host 127.0.0.1 --port 8080 --data-dir ./data
 - **先确认服务器 IP 没被 Polymarket 限制**：页面顶部有「地域」状态（调用官方 geoblock 接口），「连接自检」也会检查。
   据我查到的官方文档，部分欧洲国家（例如法国、英国、意大利等）的 IP 受限，以实时返回为准。请租用前先核对，不要用代理绕过限制。
 - **服务器时钟必须准**（chainlink/窗口边界都依赖它）：`chronyc tracking` 或 `timedatectl`，偏差 > 1 秒会在自检里报错。安装脚本会尝试打开 NTP。
-- **不要把明文 HTTP 暴露到公网**。`install.sh` 让应用只听 127.0.0.1；公网用 `--domain`，否则用上面的 SSH 隧道。
-- 网页对私钥输入有保护：非回环地址的明文 HTTP 请求会被拒绝（HTTPS 或 SSH 隧道可以）。所有写操作需要 `X-Requested-With` 头，防跨站请求。
+- 网页地址是 `http://服务器IP:8080`，需要登录。私钥不要填进网页，只写在 `/etc/pm5m.env`。所有写操作需要 `X-Requested-With` 头，防跨站请求。
 
 ## 钱包设置怎么填
 
@@ -106,7 +97,7 @@ python -m unittest discover -s tests -v
 
 ## 安全清单
 
-- 服务只监听 127.0.0.1；公网访问必须 HTTPS；防火墙只开必要端口。
+- 服务直接监听 `0.0.0.0:8080`，用登录密码保护。防火墙和云安全组只放行需要的端口（含 8080）。
 - 用专用小额钱包；不勾选「保存私钥」；设置 `PM5M_SECRET_PASSPHRASE`。
 - `data/` 目录权限限制为运行用户；不要把 `secrets.json`、`web_password.txt` 提交到版本库或备份到公共位置。
 - 本模块不构成投资建议；费率、规则、接口可能调整，以官方文档为准。
@@ -147,27 +138,13 @@ python -m pm5m.selftest
 注意：CLOB 市场频道的订阅格式尚未对照官方文档，自检中该项为 WARN 时以实际返回为准。
 
 
-## 公网访问（已配置 HTTPS 反向代理）
+## 直接访问
 
-`sudo bash deploy/install.sh --domain 你的域名` 会完成下面的 Caddy、环境变量和 systemd。手工步骤与结构如下。
+浏览器打开 `http://服务器IP:8080`，用户名 `admin`。安装脚本在本机防火墙已开启时放行该端口；阿里云、AWS 等安全组需要自己放行 TCP 8080。
 
-结构：`浏览器 → https://你的域名（Caddy，443）→ 127.0.0.1:8080（本应用）`。应用本身不对公网开放端口。
-
-1. **准备域名**：把域名的 A 记录指向服务器 IP。
-2. **防火墙**：只开放 22（SSH，建议仅密钥登录）、80、443。`ufw allow 22,80,443/tcp && ufw enable`。
-3. **安装 Caddy**，把 `deploy/Caddyfile` 中的域名改成你的域名，然后 `systemctl restart caddy`。证书会自动申请和续期。
-4. **配置环境变量**：复制 `.env.example` 为 `/etc/pm5m.env`，设置强密码、`PM5M_TRUST_PROXY=1`、`PM5M_PRIVATE_KEY`（建议）。
-   `PM5M_IP_ALLOWLIST` 填你自己的公网 IP 可以进一步限制访问，IP 变化时要改。
-5. **启动**：`systemctl enable --now pm5m`，然后访问 `https://你的域名`，用户名 `admin`。
-
-安全设计：
-- 应用只监听 127.0.0.1；直接访问服务器 8080 端口无效。
-- 启用 `PM5M_TRUST_PROXY=1` 后，私钥相关接口只接受 HTTPS 转发过来的请求。
-- 网页**默认不接受私钥输入**（`PM5M_ALLOW_WEB_KEY=0`），私钥只从环境变量读取一次，换取 API 凭据后不保存私钥。
-- 登录失败 10 次后，同一 IP 被锁 5 分钟；所有修改操作需要自定义请求头（防跨站伪造）。
-- 公网上会有扫描器，建议设置 `PM5M_IP_ALLOWLIST`，并安装 fail2ban 或仅允许密钥登录的 SSH。
-
-如果不想购买域名或开放 443 端口，也可以不开公网，用 SSH 隧道访问（见前面的说明），或用 Cloudflare Tunnel 等方式，这些都不需要本项目改动。
+- 网页默认不接受私钥（`PM5M_ALLOW_WEB_KEY=0`）。私钥写在 `/etc/pm5m.env`，重启后只用来换 API 凭据，不保存私钥。
+- 明文网页上提交私钥会被拒绝。
+- 登录失败 10 次后，同一 IP 锁 5 分钟。可选 `PM5M_IP_ALLOWLIST` 限制来源 IP。
 
 ## 资源监控
 

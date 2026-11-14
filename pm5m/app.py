@@ -9,7 +9,6 @@ import math
 import os
 import secrets
 import statistics
-import sys
 import time
 from typing import Dict, Optional
 
@@ -60,7 +59,7 @@ class App:
         self.tasks = []
         self.failures: Dict[str, list] = {}
         self.password = self._load_password()
-        # public-access settings (see README: Caddy in front, app on 127.0.0.1)
+        # PM5M_TRUST_PROXY=1 only when a reverse proxy sets X-Forwarded-*.
         self.trust_proxy = os.environ.get("PM5M_TRUST_PROXY") == "1"
         self.allow_web_key = os.environ.get("PM5M_ALLOW_WEB_KEY") == "1"
         self.allowlist = {x.strip() for x in os.environ.get("PM5M_IP_ALLOWLIST", "").split(",") if x.strip()}
@@ -516,9 +515,6 @@ def main() -> None:
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     app = App(a.data_dir)
-    if a.host not in ("127.0.0.1", "localhost", "::1") and not (app.trust_proxy or os.environ.get("PM5M_ALLOW_INSECURE") == "1"):
-        sys.exit("拒绝直接监听非本机地址。公网访问请保持 --host 127.0.0.1，由 HTTPS 反向代理（Caddy）转发，"
-                 "并设置 PM5M_TRUST_PROXY=1。")
     web.run_app(app.make_web(), host=a.host, port=a.port, access_log=None)
 
 
