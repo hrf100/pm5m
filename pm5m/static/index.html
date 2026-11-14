@@ -30,7 +30,7 @@ button.red{background:#6a2230;border-color:#96303f}button.grn{background:#1f5a3f
 .sysbar{display:flex;border-bottom:1px solid var(--line);background:var(--card)}
 .sysbar span{flex:1;padding:6px 14px;border-right:1px solid var(--line);min-width:0}
 .sysbar span:last-child{border-right:0}
-.sysbar i{display:block;font-style:normal;color:var(--mut);font-size:11px}
+.sysbar i,.sysbar em{display:block;font-style:normal;color:var(--mut);font-size:11px}
 .sysbar b{font-weight:600;font-variant-numeric:tabular-nums}
 </style>
 </head>
@@ -40,11 +40,11 @@ button.red{background:#6a2230;border-color:#96303f}button.grn{background:#1f5a3f
   <span id="feeds"></span><span id="geo" class="chip"></span><span id="clock" class="mut"></span>
 </header>
 <div class="sysbar">
-  <span><i>CPU</i><b id="sy_cpu">-</b></span>
-  <span><i>内存</i><b id="sy_mem">-</b></span>
-  <span><i>收 KB/s</i><b id="sy_rx">-</b></span>
-  <span><i>发 KB/s</i><b id="sy_tx">-</b></span>
-  <span><i>盘</i><b id="sy_disk">-</b></span>
+  <span><i>CPU</i><b id="sy_cpu">-</b><em id="sy_cpu2"></em></span>
+  <span><i>内存</i><b id="sy_mem">-</b><em id="sy_mem2"></em></span>
+  <span><i>总收</i><b id="sy_rx">-</b><em id="sy_rx2"></em></span>
+  <span><i>总发</i><b id="sy_tx">-</b><em id="sy_tx2"></em></span>
+  <span><i>盘余</i><b id="sy_disk">-</b><em id="sy_disk2"></em></span>
 </div>
 <main>
   <section class="card c4">
@@ -94,10 +94,9 @@ button.red{background:#6a2230;border-color:#96303f}button.grn{background:#1f5a3f
   <section class="card c6">
     <h2>钱包</h2>
     <div class="kv" id="wallet"></div>
-    <div id="pkrow"><label>私钥<input id="w_pk" type="password" class="wide" autocomplete="off" placeholder="0x…"></label>
-    <div class="row"><button onclick="saveWallet()">保存</button></div></div>
-    <div class="row"><button onclick="refreshWallet()">刷新余额</button><button class="red" onclick="delWallet()">清除</button><span id="wmsg" class="note"></span></div>
-    <div class="note" id="wnote"></div>
+    <label>私钥<input id="w_pk" type="password" class="wide" autocomplete="off" placeholder="0x…"></label>
+    <div class="row"><button onclick="saveWallet()">保存</button><button onclick="refreshWallet()">刷新余额</button><button class="red" onclick="delWallet()">清除</button><span id="wmsg" class="note"></span></div>
+    <div class="note">只填私钥。地址和类型自动识别，私钥不保存。</div>
   </section>
   <section class="card c6">
     <h2>持仓</h2>
@@ -184,8 +183,6 @@ function chips(feeds){return Object.values(feeds).map(f=>{const c=f.state==='con
   return `<span class="chip ${c}" title="${esc(f.error||f.extra)}">${esc(f.name)}: ${esc(f.state)}${f.age_s!=null?' '+f.age_s+'s':''}</span>`}).join(' ')}
 function render(st){
   window._bn=st.binance_enabled;window._rec=st.record_series;
-  $('pkrow').style.display=st.allow_web_key?'':'none';
-  $('wnote').textContent=st.allow_web_key?'只填私钥，地址和类型自动识别。':'私钥写在服务器 PM5M_PRIVATE_KEY，地址和类型自动识别。';
   if(!cfgLoaded)buildCfg(st.strategy.cfg);
   $('feeds').innerHTML=chips(st.feeds);
   const g=st.geo||{};$('geo').className='chip '+(g.blocked?'bad':(g.error?'warn':'ok'));$('geo').textContent=g.blocked?`地域受限 ${g.country||''}`:(g.error?'geo 未知':`地域 ${g.country||''} 可用`);
@@ -220,16 +217,22 @@ async function pollState(){try{render(await api('/api/state'))}catch(e){$('errs'
 async function pollSeries(){try{lastSeries=await api('/api/series');renderCharts()}catch(e){}setTimeout(pollSeries,2000)}
 $('full').onchange=renderCharts;window.onresize=renderCharts;pollState();pollSeries();
 
-function bytesStr(b){if(b==null)return '-';const u=['B','KB','MB','GB','TB'];let i=0;while(b>=1024&&i<4){b/=1024;i++}return b.toFixed(i?1:0)+u[i]}
+function bytesStr(b){if(b==null)return '-';const u=['B','KB','MB','GB','TB'];let i=0;while(b>=1024&&i<4){b/=1024;i++}return (i?b.toFixed(1):String(Math.round(b)))+u[i]}
 function renderSys(d){
   const s=d.stats||{}, n=k=>s[k]?s[k].now:null;
   const pct=v=>v==null?'-':Math.round(v)+'%';
-  const kb=v=>v==null?'-':(v/1024).toFixed(1);
+  const rate=v=>v==null?'-':(v/1024).toFixed(1)+' KB/s';
+  const mem=d.mem||{}, nic=d.nic||{};
   $('sy_cpu').textContent=pct(n('cpu_sys'));
-  $('sy_mem').textContent=pct(n('mem_sys'));
-  $('sy_rx').textContent=kb(n('rx_bps'));
-  $('sy_tx').textContent=kb(n('tx_bps'));
+  $('sy_cpu2').textContent=n('cpu_proc')==null?'':('进程 '+n('cpu_proc').toFixed(2)+'%');
+  $('sy_mem').textContent=bytesStr(mem.used_bytes)+' / '+bytesStr(mem.total_bytes);
+  $('sy_mem2').textContent=pct(n('mem_sys'));
+  $('sy_rx').textContent=bytesStr(nic.rx_bytes);
+  $('sy_rx2').textContent=rate(n('rx_bps'));
+  $('sy_tx').textContent=bytesStr(nic.tx_bytes);
+  $('sy_tx2').textContent=rate(n('tx_bps'));
   $('sy_disk').textContent=bytesStr(d.disk&&d.disk.free_bytes);
+  $('sy_disk2').textContent='';
 }
 async function pollSys(){try{renderSys(await api('/api/sys'))}catch(e){}setTimeout(pollSys,2000)}
 pollSys();

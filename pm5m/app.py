@@ -351,10 +351,6 @@ class App:
     async def h_wallet_post(self, request):
         body = await request.json()
         pk = (body.get("private_key") or "").strip()
-        if pk and not self.allow_web_key:
-            return web.json_response({"error": "网页输入私钥已禁用。请在服务器环境变量 PM5M_PRIVATE_KEY 中设置。"}, status=403)
-        if pk and not self.transport_ok(request):
-            return web.json_response({"error": "拒绝通过明文 HTTP 传输私钥：请用 HTTPS 反向代理或 SSH 隧道访问（127.0.0.1）"}, status=403)
         try:
             if pk:
                 from .clobauth import address_from_key

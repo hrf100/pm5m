@@ -140,9 +140,7 @@ class TestHandlers(unittest.TestCase):
         self.assertEqual(r.status, 400)
         r = run(a.h_wallet_post(Req({"signature_type": 0, "funder": "0x123"})))
         self.assertEqual(r.status, 400)
-        r = run(a.h_wallet_post(Req({"signature_type": 0, "private_key": "0x" + "11" * 32}, remote="8.8.8.8")))
-        self.assertEqual(r.status, 403)                     # plain HTTP from a non-local client is refused
-        r = run(a.h_wallet_post(Req({"signature_type": 0})))  # nothing to save
+        r = run(a.h_wallet_post(Req({})))  # nothing to save
         self.assertEqual(r.status, 400)
         # manual credentials path (no private key involved)
         class FakeFeeds:
@@ -216,11 +214,31 @@ class TestPublicAccess(unittest.TestCase):
         r = Req({}, headers={"X-Forwarded-Proto": "https"}, remote="127.0.0.1")
         self.assertTrue(self.app.transport_ok(r))
 
-    def test_web_private_key_disabled_by_default(self):
+    def test_page_accepts_private_key(self):
+        from pm5m import clobauth
         self.app.allow_web_key = False
-        r = run(self.app.h_wallet_post(Req({"signature_type": 0, "private_key": "0x" + "11" * 32})))
-        self.assertEqual(r.status, 403)
-        self.assertIn("禁用", json.loads(r.text)["error"])
+        class FakeFeeds:
+            errors = {}
+            async def reconnect_polybolt(self): pass
+        class FakeApi:
+            async def derive_creds(self, pk):
+                return {"apiKey": "k", "secret": "s", "passphrase": "p"}
+            async def resolve_account(self, signer):
+                return {"funder": "0x" + "cd" * 20, "sig_type": 3}
+            async def onchain_pusd(self, a): return 0
+            async def value(self, a): return 0
+            async def positions(self, a): return []
+            async def clob_balance(self, *a): return 0
+        self.app.feeds, self.app.api = FakeFeeds(), FakeApi()
+        orig = clobauth.address_from_key
+        clobauth.address_from_key = lambda pk: "0x" + "ab" * 20
+        try:
+            r = run(self.app.h_wallet_post(Req({"private_key": "0x" + "11" * 32}, remote="8.8.8.8")))
+        finally:
+            clobauth.address_from_key = orig
+        self.assertEqual(r.status, 200)
+        self.assertEqual(self.app.secrets["funder"], "0x" + "cd" * 20)
+        self.assertNotIn("private_key", open(self.app.store.secrets.path).read())
 
     def test_sys_endpoint(self):
         r = run(self.app.h_sys(Req(method="GET")))

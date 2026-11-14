@@ -169,9 +169,13 @@ class SysMon:
         def delta(k):
             return max(cur.get(k, 0) - first.get(k, 0), 0) if k in cur and k in first else None
         free, size = self._disk_info()
+        total, avail = cur.get("mem_total"), cur.get("mem_avail")
+        used = total - avail if total and avail is not None else None
         return {"now": time.time(), "ncpu": NCPU, "window_s": len(pts) * 2,
                 "series": {"t": [p["t"] for p in pts], **{k: [p.get(k) for p in pts] for k in keys}},
                 "stats": stats,
+                "mem": {"total_bytes": total, "used_bytes": used},
+                "nic": {"rx_bytes": cur.get("rx"), "tx_bytes": cur.get("tx")},
                 "totals_since_start": {"nic_rx_bytes": delta("rx"), "nic_tx_bytes": delta("tx"),
                                        "feed_bytes": delta("feed_bytes"), "http_out_bytes": delta("http_out")},
                 "disk": {"free_bytes": free, "data_dir_bytes": size}}
